@@ -308,7 +308,8 @@ bot.start((ctx) => {
   chatIDs.add(ctx.chat.id);
   saveChats();
   if (ctx.chat.type === 'private') {
-    ctx.reply('¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.', menuPrincipal());
+    ctx.reply('¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.', { reply_markup: { remove_keyboard: true } });
+    setTimeout(() => ctx.reply('🏠 MENÚ PRINCIPAL', menuPrincipal()), 300);
   } else {
     ctx.reply(
       '✅ ¡LiveScore Bot activo en el grupo!\n\n' +
