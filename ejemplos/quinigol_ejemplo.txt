@@ -1,0 +1,10 @@
+# Formato Quinigol: cada línea 12 caracteres SIN espacios
+# 6 pares golesLocal golesVisitante
+# Valores: 0, 1, 2, M (3 o más)
+# Ejemplo: 012M1011M200 = 0-1 2-M 1-0 1-1 M-2 0-0
+# Líneas que empiezan con # son comentarios
+
+012M1011M200
+1M012210M1120
+1100MM21021M
+211M0012M022

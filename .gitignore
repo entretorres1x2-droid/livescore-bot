@@ -1,0 +1,5 @@
+node_modules/
+.env
+datos/jugadas_*.txt
+datos/chats.json
+datos/penas.json

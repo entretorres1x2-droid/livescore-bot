@@ -1,0 +1,10 @@
+# Formato Quiniela: cada línea 16 caracteres SIN espacios
+# Caracteres 1-14: 1 (local), X (empate), 2 (visitante) → 14 partidos
+# Caracteres 15-16: pleno al 15 (goles local y visitante: 0,1,2,M)
+# Ejemplo: 1X21X21X21X21X0M = 14 1X2 + pleno 0-M
+# Líneas que empiezan con # son comentarios
+
+1X21X21X21X21X0M
+112X121X211X1102
+X211X12X12X11112
+1X21X21X21X212M2
