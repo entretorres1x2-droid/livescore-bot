@@ -16,24 +16,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 bot.use(session());
 
-const MENU = Markup.removeKeyboard();
-
-// === Navegación por botones inline ===
+const MENU = Markup.keyboard([
+  ['📋 Peñas', '📊 Ranking'],
+  ['⚽ Partidos', '📅 Jornada'],
+  ['📊 Resumen', '➕ Crear Peña'],
+  ['❌ Detener Notificaciones'],
+]).resize();
 
 function volverBtn(texto = '🏠 Menú Principal') {
   return Markup.inlineKeyboard([[Markup.button.callback(texto, 'menu_principal')]]);
-}
-
-function menuPrincipal() {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('📋 Peñas', 'menu_penas'),
-     Markup.button.callback('📊 Ranking', 'menu_ranking')],
-    [Markup.button.callback('⚽ Partidos', 'menu_partidos'),
-     Markup.button.callback('📅 Jornada', 'menu_jornada')],
-    [Markup.button.callback('📊 Resumen', 'menu_resumen')],
-    [Markup.button.callback('➕ Crear Peña', 'menu_crear'),
-     Markup.button.callback('❌ Detener Notificaciones', 'menu_stop')],
-  ]);
 }
 
 let partidosAnteriores = [];
@@ -173,7 +164,7 @@ bot.action('wizard_cancelar', (ctx) => {
 // === NAVEGACIÓN POR BOTONES INLINE ===
 
 bot.action('menu_principal', async (ctx) => {
-  ctx.editMessageText('🏠 MENÚ PRINCIPAL', menuPrincipal());
+  ctx.editMessageText('🏠 Menú Principal. Usa los botones de abajo 👇');
 });
 
 bot.action('menu_penas', async (ctx) => {
@@ -288,9 +279,9 @@ bot.action('menu_resumen', async (ctx) => {
 
 bot.action('menu_crear', (ctx) => {
   ctx.editMessageText('¿De qué tipo es la peña?', Markup.inlineKeyboard([
-    Markup.button.callback('🔵 Quiniela', 'wizard_tipo_quiniela'),
-    Markup.button.callback('🟢 Quinigol', 'wizard_tipo_quinigol'),
-    Markup.button.callback('❌ Cancelar', 'menu_principal'),
+    [Markup.button.callback('🔵 Quiniela', 'wizard_tipo_quiniela')],
+    [Markup.button.callback('🟢 Quinigol', 'wizard_tipo_quinigol')],
+    [Markup.button.callback('❌ Cancelar', 'menu_principal')],
   ]));
 });
 
@@ -308,8 +299,10 @@ bot.start((ctx) => {
   chatIDs.add(ctx.chat.id);
   saveChats();
   if (ctx.chat.type === 'private') {
-    ctx.reply('¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.', { reply_markup: { remove_keyboard: true } });
-    setTimeout(() => ctx.reply('🏠 MENÚ PRINCIPAL', menuPrincipal()), 300);
+    ctx.reply(
+      '¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.\n\nUsa los botones de abajo 👇',
+      MENU
+    );
   } else {
     ctx.reply(
       '✅ ¡LiveScore Bot activo en el grupo!\n\n' +
@@ -562,6 +555,41 @@ bot.on('text', async (ctx) => {
         [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
       ])
     );
+  }
+
+  // Menú de teclado (fijo en la parte inferior)
+  if (isPrivate) {
+    if (txt === '📋 Peñas') {
+      const lista = listarPenas();
+      if (lista.length === 0) return ctx.reply('No hay peñas todavía. Usa "➕ Crear Peña".', MENU);
+      const msg = lista.map(p => `${p.nombre} (${p.tipo})`).join('\n');
+      return ctx.reply(`📋 PEÑAS:\n\n${msg}`, Markup.inlineKeyboard([
+        ...lista.map(p => [Markup.button.callback(p.nombre, `pena_det_${encodeURIComponent(p.nombre)}`)]),
+        [Markup.button.callback('➕ Crear Peña', 'menu_crear')],
+      ]));
+    }
+    if (txt === '📊 Ranking') {
+      try {
+        const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
+        const rkQ = formatearRanking('quiniela', result.quiniela, premios);
+        const rkG = formatearRanking('quinigol', result.quinigol, premios);
+        let msg = '';
+        if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
+        else msg += rkQ + '\n';
+        if (rkG.includes('No hay')) msg += '\n❌ No hay peñas de quinigol.';
+        else msg += '\n' + rkG;
+        ctx.reply(msg, MENU);
+      } catch (e) { ctx.reply(`Error: ${e.message}`, MENU); }
+      return;
+    }
+    if (txt === '⚽ Partidos') return ctx.reply(await generarPartidos(), MENU);
+    if (txt === '📅 Jornada') return ctx.reply(await generarJornada(), MENU);
+    if (txt === '📊 Resumen') return ctx.reply(await generarResumen(), MENU);
+    if (txt === '➕ Crear Peña') return iniciarWizard(ctx);
+    if (txt === '❌ Detener Notificaciones') {
+      chatIDs.delete(ctx.chat.id); saveChats();
+      return ctx.reply('Dejaste de recibir notis. Usa /start para volver.', Markup.removeKeyboard());
+    }
   }
 
   if (s.esperandoArchivo) ctx.reply('Envía el archivo .txt, no texto. Usa 📎 > Archivo.', MENU);
