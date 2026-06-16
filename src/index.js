@@ -202,6 +202,7 @@ bot.help((ctx) => ctx.reply(
   '/penas - Listar todas las peñas\n' +
   '/pena NOMBRE - Detalle de una peña\n' +
   '/cargar_pena NOMBRE - Subir jugadas\n' +
+  '/borrar_pena NOMBRE - Borrar peña\n' +
   '/stop - Darse de baja de notis',
   ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard()
 ));
@@ -319,6 +320,34 @@ bot.command('cargar_pena', async (ctx) => {
   if (!pena) return ctx.reply(`No existe "${nombre}".`, kb(ctx));
   ctx.session.esperandoPena = nombre;
   ctx.reply(`Envía el archivo .txt para "${nombre}" (${pena.tipo}).`, kb(ctx));
+});
+
+bot.command('borrar_pena', async (ctx) => {
+  const nombre = ctx.message.text.slice('/borrar_pena'.length).trim();
+  if (!nombre) {
+    const lista = listarPenas();
+    if (lista.length === 0) return ctx.reply('No hay peñas.', kb(ctx));
+    return ctx.reply('Uso: /borrar_pena <nombre>\nPeñas: ' + lista.map(p => p.nombre).join(', '), kb(ctx));
+  }
+  const pena = obtenerPena(nombre);
+  if (!pena) return ctx.reply(`No existe "${nombre}".`, kb(ctx));
+  ctx.reply(
+    `¿Seguro que quieres borrar la peña "${nombre}" (${pena.tipo})?`,
+    Markup.inlineKeyboard([
+      Markup.button.callback('✅ Sí, borrar', `borrar_${nombre}`),
+      Markup.button.callback('❌ No', 'borrar_no'),
+    ])
+  );
+});
+
+bot.action(/^borrar_(.+)$/, async (ctx) => {
+  const nombre = ctx.match[1];
+  const res = eliminarPena(nombre);
+  ctx.editMessageText(res.ok ? `✅ Peña "${nombre}" borrada.` : `❌ ${res.error}`);
+});
+
+bot.action('borrar_no', (ctx) => {
+  ctx.editMessageText('Cancelado.');
 });
 
 bot.command('ranking', async (ctx) => {
