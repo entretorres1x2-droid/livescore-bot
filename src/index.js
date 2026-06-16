@@ -10,7 +10,7 @@ import { analizarImpacto, resumenJugadasVivas } from './analyzer.js';
 import { generarComentarioIA, generarComentarioGol, generarComentarioVivas } from './commentary.js';
 import { listarPenas, crearPena, eliminarPena, cargarJugadasPena, obtenerPena, escrutarPena, escrutarTodas } from './penas.js';
 import { formatearRanking, formatearRankingCompacto } from './ranking.js';
-import { formatearBoleto, formatearMejoresColumnas } from './boleto.js';
+import { formatearBoleto, formatearMejoresColumnas, formatearNotificacionDetallada } from './boleto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
@@ -88,28 +88,30 @@ async function checkScores() {
       }
     }
 
-    for (const p of eventos.inicio) {
-      await enviarAlGrupo(`🟢 COMENZÓ: ${p.local} vs ${p.visitante}`);
+    async function notificarDetalle(result, premios, titulo) {
+      if (!targetGroupId) return;
+      if (titulo) await enviarAlGrupo(titulo);
+      const peñas = listarPenas();
+      for (const p of peñas) {
+        const partidos = p.tipo === 'quiniela' ? result.quiniela : result.quinigol;
+        const msg = formatearNotificacionDetallada(p.nombre, partidos, premios);
+        if (msg) await enviarAlGrupo(msg);
+      }
     }
 
-    for (const p of eventos.final) {
-      await enviarAlGrupo(`🏁 FINAL: ${p.local} ${p.golesLocal}-${p.golesVisitante} ${p.visitante}`);
-    }
-
-    if (eventos.inicio.length > 0 || eventos.final.length > 0) {
-      await mostrarRanking(targetGroupId, result, premios);
-    }
-
+    // Anunciar eventos
+    for (const p of eventos.inicio) await enviarAlGrupo(`🟢 COMENZÓ: ${p.local} vs ${p.visitante}`);
+    for (const p of eventos.final) await enviarAlGrupo(`🏁 FINAL: ${p.local} ${p.golesLocal}-${p.golesVisitante} ${p.visitante}`);
     for (const gol of goles) {
       const infoGol = { ...gol };
-      const impactoGlobal = analizarImpacto(
-        infoGol, result.quiniela, result.quinigol,
+      const impactoGlobal = analizarImpacto(infoGol, result.quiniela, result.quinigol,
         config.quinielaJugadas.map(j => parseQuinielaJugada(j)).filter(Boolean),
-        config.quinigolJugadas.map(j => parseQuinigolJugada(j)).filter(Boolean)
-      );
-      const msgGlobal = await generarComentarioIA(infoGol, impactoGlobal);
-      await enviarAlGrupo(msgGlobal, { parse_mode: 'HTML' });
-      await mostrarRanking(targetGroupId, result, premios);
+        config.quinigolJugadas.map(j => parseQuinigolJugada(j)).filter(Boolean));
+      await enviarAlGrupo(await generarComentarioIA(infoGol, impactoGlobal), { parse_mode: 'HTML' });
+    }
+
+    if (eventos.inicio.length > 0 || eventos.final.length > 0 || goles.length > 0) {
+      await notificarDetalle(result, premios, '📊 ACTUALIZACIÓN');
     }
 
     partidosAnteriores = result.todos;
@@ -340,30 +342,21 @@ async function generarJornada() {
   msg += `Peñas: ${peñas.length}\n\n`;
 
   try {
-    const [jornadaQL, jornadaQGL, eventos, result] = await Promise.all([
+    const [jornadaQL, jornadaQGL] = await Promise.all([
       obtenerJornadaQuiniela(), obtenerJornadaQuinigol(),
-      obtenerEventosESPN(), obtenerPartidosEnVivo(),
     ]);
 
-    msg += `📅 Quiniela: ${jornadaQL.length} | Quinigol: ${jornadaQGL.length}\n`;
-    msg += `📡 ESPN: ${eventos.length} | Emparejados: ${result.quiniela.length} Q, ${result.quinigol.length} QG\n`;
-
     if (jornadaQL.length > 0) {
-      msg += '\n⚽ Quiniela:\n' + jornadaQL.slice(0, 5).map(p =>
+      msg += '⚽ QUINIELA:\n' + jornadaQL.map(p =>
         `${p.local} - ${p.visitante} [${p.marcador}]`
-      ).join('\n') + (jornadaQL.length > 5 ? `\n... y ${jornadaQL.length - 5} más` : '');
+      ).join('\n') + '\n\n';
     }
     if (jornadaQGL.length > 0) {
-      msg += '\n\n⚽ Quinigol:\n' + jornadaQGL.slice(0, 5).map(p =>
+      msg += '⚽ QUINIGOL:\n' + jornadaQGL.map(p =>
         `${p.local} - ${p.visitante} [${p.marcador}]`
-      ).join('\n') + (jornadaQGL.length > 5 ? `\n... y ${jornadaQGL.length - 5} más` : '');
+      ).join('\n');
     }
-    if (result.quiniela.length > 0) {
-      msg += '\n\n🔴 En directo:\n' + result.quiniela.map(p => {
-        const s = p.golesLocal !== null ? `${p.golesLocal}-${p.golesVisitante}` : '-:-';
-        return `${p.local} ${s} ${p.visitante} (${p.minuto})`;
-      }).join('\n');
-    }
+    if (jornadaQL.length === 0 && jornadaQGL.length === 0) msg += 'No hay partidos de quiniela/quinigol en esta jornada.';
   } catch (e) { msg += `\n❌ Error: ${e.message}`; }
   return msg;
 }

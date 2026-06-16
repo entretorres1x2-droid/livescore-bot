@@ -99,6 +99,61 @@ export function formatearBoleto(penaNombre, numJugada, partidos) {
   return { ok: true, msg: lineas.join('\n') };
 }
 
+function estimarPremio(tipo, categoria, recaudacion) {
+  if (!categoria || typeof categoria !== 'number') return 0;
+  const pcts = tipo === 'quiniela'
+    ? { 15: 0.10, 14: 0.105, 13: 0.115, 12: 0.115, 11: 0.115, 10: 0 }
+    : { 6: 0.12, 5: 0.12, 4: 0.12, 3: 0.12, 2: 0.02 };
+  const pct = pcts[categoria];
+  if (!pct) return 0;
+  return Math.round(recaudacion * pct);
+}
+
+export function formatearNotificacionDetallada(penaNombre, partidos, premios) {
+  const pena = obtenerPena(penaNombre);
+  if (!pena) return '';
+  const tipo = pena.tipo;
+  const parseFn = tipo === 'quiniela' ? parseQuinielaJugada : parseQuinigolJugada;
+  const analizar = tipo === 'quiniela' ? analizarQuiniela : analizarQuinigol;
+  const total = tipo === 'quiniela' ? 15 : 6;
+  const recaudacion = premios?.recaudacion || 1_200_000;
+
+  const columnas = [];
+  for (let idx = 0; idx < pena.jugadas.length; idx++) {
+    const raw = pena.jugadas[idx];
+    const jugada = parseFn(raw);
+    if (!jugada) continue;
+    const resultadosArr = partidos.map(p => ({ local: p.golesLocal, visitante: p.golesVisitante }));
+    let aciertos = 0;
+    let viva = true;
+    for (let i = 0; i < total; i++) {
+      const res = analizar(resultadosArr, jugada, i);
+      if (!res.viva) { viva = false; break; }
+      if (res.aciertos > 0) aciertos++;
+    }
+    const pendientes = partidos.filter(p => !p.finalizado && p.estado !== 'post').length;
+    const maxPosible = Math.min(aciertos + (viva ? pendientes : 0), total);
+    const premioEst = estimarPremio(tipo, viva ? maxPosible : 0, recaudacion);
+    columnas.push({ num: idx + 1, raw, aciertos, viva, maxPosible, premioEst });
+  }
+
+  columnas.sort((a, b) => {
+    if (a.viva !== b.viva) return a.viva ? -1 : 1;
+    return b.maxPosible - a.maxPosible;
+  });
+
+  const vivas = columnas.filter(c => c.viva).length;
+  const lineas = [`📊 ${pena.nombre} (${tipo}): ${vivas}✅ ${columnas.length - vivas}💀 de ${columnas.length}`];
+
+  const mostrar = columnas.slice(0, 8);
+  for (const c of mostrar) {
+    const mon = c.viva && c.premioEst > 0 ? ` ~${c.premioEst.toLocaleString('es-ES')}€` : '';
+    lineas.push(`#${c.num} → cat${c.maxPosible}${c.viva ? '✓' : '💀'}${mon}`);
+  }
+
+  return lineas.join('\n');
+}
+
 export function formatearMejoresColumnas(penaNombre, partidos) {
   const pena = obtenerPena(penaNombre);
   if (!pena) return { ok: false, msg: 'Peña no encontrada.' };
