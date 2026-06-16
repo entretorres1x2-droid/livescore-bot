@@ -481,21 +481,47 @@ async function startPolling() {
   setInterval(checkScores, config.POLL_INTERVAL * 1000);
 }
 
-// Health check server para Fly.io
+// Health check + webhook server
 const PORT = process.env.PORT || 8080;
-createServer((req, res) => {
+const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
+
+// Si estamos en Render, usar webhook en vez de polling
+const usarWebhook = !!process.env.RENDER_SERVICE_ID;
+
+createServer(async (req, res) => {
+  // Webhook handler para Telegram
+  if (usarWebhook && req.url === '/' && req.method === 'POST') {
+    try {
+      const buffers = [];
+      for await (const chunk of req) buffers.push(chunk);
+      const body = Buffer.concat(buffers).toString();
+      await bot.handleUpdate(JSON.parse(body));
+    } catch (e) {
+      console.error('Error en webhook:', e.message);
+    }
+    return res.end('OK');
+  }
+
+  // Health check
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`Health check server en puerto ${PORT}`);
+  console.log(`Servidor en puerto ${PORT} (webhook: ${usarWebhook})`);
 });
 
-bot.launch().then(() => {
-  console.log('🤖 Bot de LiveScore Quiniela iniciado!');
+async function iniciar() {
+  if (usarWebhook) {
+    await bot.telegram.setWebhook(RENDER_URL);
+    console.log('Webhook configurado en', RENDER_URL);
+  } else {
+    await bot.launch();
+    console.log('🤖 Bot iniciado (polling)');
+  }
   startPolling();
-}).catch(err => {
-  console.error('Error al iniciar el bot (no crítico):', err.message);
-  // Health check sigue funcionando aunque el bot falle
+}
+
+iniciar().catch(err => {
+  console.error('Error al iniciar:', err.message);
   startPolling();
 });
 
