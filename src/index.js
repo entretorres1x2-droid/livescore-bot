@@ -531,10 +531,16 @@ async function iniciar() {
   if (usarWebhook) {
     await bot.telegram.setWebhook(RENDER_URL);
     console.log('Webhook configurado en', RENDER_URL);
-    // Re-set webhook cada 15s para vencer al bot viejo en JustRunMy
-    setInterval(() => {
-      bot.telegram.setWebhook(RENDER_URL).catch(() => {});
-    }, 15000);
+    // Re-set webhook cada 3s para vencer al bot viejo en JustRunMy
+    setInterval(async () => {
+      try {
+        const info = await bot.telegram.getWebhookInfo();
+        if (info.url !== RENDER_URL) {
+          await bot.telegram.setWebhook(RENDER_URL);
+          console.log('Webhook re-set (era:', info.url || '(vacío)', ')');
+        }
+      } catch (e) {}
+    }, 3000);
   } else {
     await bot.launch();
     console.log('🤖 Bot iniciado (polling)');
