@@ -247,8 +247,8 @@ bot.action(/^borrar_ok_(.+)$/, async (ctx) => {
 bot.action('menu_ranking', async (ctx) => {
   try {
     const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
-    const rkQ = formatearRanking('quiniela', result.quiniela, premios);
-    const rkG = formatearRanking('quinigol', result.quinigol, premios);
+    const rkQ = formatearRanking('quiniela', result?.quiniela || [], premios);
+    const rkG = formatearRanking('quinigol', result?.quinigol || [], premios);
     let msg = '';
     if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
     else msg += rkQ + '\n';
@@ -553,8 +553,8 @@ bot.on('text', async (ctx) => {
     if (txt === '📊 Ranking') {
       try {
         const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
-        const rkQ = formatearRanking('quiniela', result.quiniela, premios);
-        const rkG = formatearRanking('quinigol', result.quinigol, premios);
+        const rkQ = formatearRanking('quiniela', result?.quiniela || [], premios);
+        const rkG = formatearRanking('quinigol', result?.quinigol || [], premios);
         let msg = '';
         if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
         else msg += rkQ + '\n';

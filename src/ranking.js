@@ -30,6 +30,7 @@ function estimarPremio(recaudacion, bote, categoria, pcts, tipo) {
 }
 
 function calcularMaxCategoria(partidos, jugadasRaw, tipo) {
+  if (!partidos || !Array.isArray(partidos)) return { max: 0, min: 0, maxCat: 0, numVivas: 0 };
   const totalPartidos = partidos.length;
   if (totalPartidos === 0 || jugadasRaw.length === 0) return { max: 0, min: 0, maxCat: 0, numVivas: 0 };
 
@@ -83,6 +84,7 @@ function calcularMaxCategoria(partidos, jugadasRaw, tipo) {
 }
 
 function calcularRanking(tipo, partidos, premios) {
+  if (!partidos || !Array.isArray(partidos)) return [];
   const peñas = listarPenas().filter(p => p.tipo === tipo);
   const finalizados = partidos.filter(p => p.finalizado || p.estado === 'post').length;
 
