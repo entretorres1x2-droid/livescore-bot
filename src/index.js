@@ -10,6 +10,7 @@ import { analizarImpacto, resumenJugadasVivas } from './analyzer.js';
 import { generarComentarioIA, generarComentarioGol, generarComentarioVivas } from './commentary.js';
 import { listarPenas, crearPena, eliminarPena, cargarJugadasPena, obtenerPena, escrutarPena, escrutarTodas } from './penas.js';
 import { formatearRanking, formatearRankingCompacto } from './ranking.js';
+import { formatearBoleto, formatearMejoresColumnas } from './boleto.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
@@ -203,6 +204,7 @@ bot.help((ctx) => ctx.reply(
   '/pena NOMBRE - Detalle de una peña\n' +
   '/cargar_pena NOMBRE - Subir jugadas\n' +
   '/borrar_pena NOMBRE - Borrar peña\n' +
+  '/boleto PEÑA # - Ver boleto visual\n' +
   '/stop - Darse de baja de notis',
   ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard()
 ));
@@ -304,12 +306,19 @@ bot.command('pena', async (ctx) => {
   const result = await obtenerPartidosEnVivo();
   const pena = obtenerPena(nombre);
   if (!pena) return ctx.reply('Peña no encontrada.', kb(ctx));
-  const e = escrutarPena(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
-  if (!e) return ctx.reply('Error.', kb(ctx));
 
-  let msg = `📊 ${e.nombre} (${e.tipo})\nTotal: ${e.total} | Vivas: ${e.vivas} | Muertas: ${e.muertas}\n\n`;
-  msg += formatearCategorias(e.categorias, e.tipo === 'quiniela' ? 15 : 6);
-  if (e.escrutinio.length <= 20) msg += '\n\n' + formatearEscrito(e);
+  // Escrutinio resumen
+  const e = escrutarPena(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
+  let msg = '';
+  if (e) {
+    msg = `📊 ${e.nombre} (${e.tipo})\nTotal: ${e.total} | Vivas: ${e.vivas} | Muertas: ${e.muertas}\n\n`;
+    msg += formatearCategorias(e.categorias, e.tipo === 'quiniela' ? 15 : 6);
+  }
+
+  // Mejores columnas
+  const cols = formatearMejoresColumnas(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
+  if (cols.ok) msg += '\n\n' + cols.msg;
+
   ctx.reply(msg, kb(ctx));
 });
 
@@ -348,6 +357,18 @@ bot.action(/^borrar_(.+)$/, async (ctx) => {
 
 bot.action('borrar_no', (ctx) => {
   ctx.editMessageText('Cancelado.');
+});
+
+bot.command('boleto', async (ctx) => {
+  const args = ctx.message.text.slice('/boleto'.length).trim().split(/\s+/);
+  const nombre = args.slice(0, -1).join(' ') || '';
+  const num = parseInt(args[args.length - 1]);
+  if (!nombre || isNaN(num)) return ctx.reply('Uso: /boleto NOMBRE_PEÑA NUMERO_JUGADA', kb(ctx));
+  const result = await obtenerPartidosEnVivo();
+  const partidos = obtenerPena(nombre)?.tipo === 'quiniela' ? result.quiniela : result.quinigol;
+  if (!partidos) return ctx.reply('Peña no encontrada.', kb(ctx));
+  const b = formatearBoleto(nombre, num, partidos);
+  ctx.reply(b.msg, { parse_mode: 'Markdown', ...kb(ctx) });
 });
 
 bot.command('ranking', async (ctx) => {
