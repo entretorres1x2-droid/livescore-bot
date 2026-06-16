@@ -16,10 +16,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 bot.use(session());
 
-const MENU = Markup.keyboard([
-  ['➕ Crear Peña', '📋 Peñas', '📊 Resumen'],
-  ['⚽ Partidos', '📅 Jornada', '❌ Stop'],
-]).resize();
+const MENU = Markup.removeKeyboard();
+
+// === Navegación por botones inline ===
+
+function volverBtn(texto = '🏠 Menú Principal') {
+  return Markup.inlineKeyboard([[Markup.button.callback(texto, 'menu_principal')]]);
+}
+
+function menuPrincipal() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📋 Peñas', 'menu_penas'),
+     Markup.button.callback('📊 Ranking', 'menu_ranking')],
+    [Markup.button.callback('⚽ Partidos', 'menu_partidos'),
+     Markup.button.callback('📅 Jornada', 'menu_jornada')],
+    [Markup.button.callback('📊 Resumen', 'menu_resumen')],
+    [Markup.button.callback('➕ Crear Peña', 'menu_crear'),
+     Markup.button.callback('❌ Detener Notificaciones', 'menu_stop')],
+  ]);
+}
 
 let partidosAnteriores = [];
 let chatIDs = new Set();
@@ -135,9 +150,9 @@ function iniciarWizard(ctx) {
   ctx.session = ctx.session || {};
   ctx.session.wizard = 'esperando_tipo';
   ctx.reply('¿De qué tipo es la peña?', Markup.inlineKeyboard([
-    Markup.button.callback('🔵 Quiniela', 'wizard_tipo_quiniela'),
-    Markup.button.callback('🟢 Quinigol', 'wizard_tipo_quinigol'),
-    Markup.button.callback('❌ Cancelar', 'wizard_cancelar'),
+    [Markup.button.callback('🔵 Quiniela', 'wizard_tipo_quiniela')],
+    [Markup.button.callback('🟢 Quinigol', 'wizard_tipo_quinigol')],
+    [Markup.button.callback('❌ Cancelar', 'menu_principal')],
   ]));
 }
 
@@ -150,19 +165,141 @@ bot.action(/^wizard_tipo_(quiniela|quinigol)$/, (ctx) => {
 
 bot.action('wizard_cancelar', (ctx) => {
   ctx.session.wizard = null;
-  ctx.editMessageText('Cancelado.');
+  ctx.editMessageText('Cancelado.', Markup.inlineKeyboard([
+    [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+  ]));
 });
 
-bot.action(/^wizard_cargar_(.+)$/, async (ctx) => {
-  const nombre = ctx.match[1];
+// === NAVEGACIÓN POR BOTONES INLINE ===
+
+bot.action('menu_principal', async (ctx) => {
+  ctx.editMessageText('🏠 MENÚ PRINCIPAL', menuPrincipal());
+});
+
+bot.action('menu_penas', async (ctx) => {
+  const lista = listarPenas();
+  if (lista.length === 0) {
+    return ctx.editMessageText('No hay peñas todavía.', Markup.inlineKeyboard([
+      [Markup.button.callback('➕ Crear Peña', 'menu_crear')],
+      [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+    ]));
+  }
+  const btns = lista.map(p => [Markup.button.callback(
+    `${p.nombre} (${p.tipo})`, `pena_det_${encodeURIComponent(p.nombre)}`
+  )]);
+  btns.push([Markup.button.callback('🏠 Menú Principal', 'menu_principal')]);
+  ctx.editMessageText('📋 PEÑAS DISPONIBLES', Markup.inlineKeyboard(btns));
+});
+
+bot.action(/^pena_det_(.+)$/, async (ctx) => {
+  const nombre = decodeURIComponent(ctx.match[1]);
+  const result = await obtenerPartidosEnVivo();
+  const pena = obtenerPena(nombre);
+  if (!pena) return ctx.editMessageText('Peña no encontrada.', menuPrincipal());
+  const e = escrutarPena(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
+  let msg = '';
+  if (e) msg = `📊 ${e.nombre} (${e.tipo})\nTotal: ${e.total} | Vivas: ${e.vivas} | Muertas: ${e.muertas}`;
+  const cols = formatearMejoresColumnas(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
+  if (cols.ok) msg += '\n\n' + cols.msg;
+  ctx.editMessageText(msg, Markup.inlineKeyboard([
+    [Markup.button.callback('📄 Ver Boleto #1', `boleto_${encodeURIComponent(nombre)}_1`)],
+    [Markup.button.callback('📁 Cargar Jugadas', `cargar_${encodeURIComponent(nombre)}`),
+     Markup.button.callback('🗑️ Borrar', `borrar_${encodeURIComponent(nombre)}`)],
+    [Markup.button.callback('🔙 Volver a Peñas', 'menu_penas'),
+     Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+  ]));
+});
+
+bot.action(/^boleto_(.+)_(\d+)$/, async (ctx) => {
+  const nombre = decodeURIComponent(ctx.match[1]);
+  const num = parseInt(ctx.match[2]);
+  const result = await obtenerPartidosEnVivo();
+  const partidos = obtenerPena(nombre)?.tipo === 'quiniela' ? result.quiniela : result.quinigol;
+  if (!partidos) return ctx.editMessageText('Peña no encontrada.', menuPrincipal());
+  const b = formatearBoleto(nombre, num, partidos);
+  const sigNum = num + 1;
+  ctx.editMessageText(b.msg, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('➡️ Siguiente', `boleto_${encodeURIComponent(nombre)}_${sigNum}`)],
+      [Markup.button.callback(`🔙 Volver a ${nombre}`, `pena_det_${encodeURIComponent(nombre)}`),
+       Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+    ])
+  });
+});
+
+bot.action(/^cargar_(.+)$/, async (ctx) => {
+  const nombre = decodeURIComponent(ctx.match[1]);
   ctx.session.esperandoPena = nombre;
-  ctx.editMessageText(`OK, envía el archivo .txt para "${nombre}".`);
+  ctx.editMessageText(`Envía el archivo .txt para "${nombre}".`, Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 Cancelar', `pena_det_${encodeURIComponent(nombre)}`)],
+  ]));
 });
 
-bot.action(/^wizard_nocargar_(.+)$/, (ctx) => {
-  const nombre = ctx.match[1];
-  ctx.session.wizard = null;
-  ctx.editMessageText(`✅ Peña "${nombre}" creada. Puedes cargar jugadas después con /cargar_pena ${nombre}.`);
+bot.action(/^borrar_(?!ok_)(.+)$/, async (ctx) => {
+  const nombre = decodeURIComponent(ctx.match[1]);
+  const pena = obtenerPena(nombre);
+  if (!pena) return ctx.editMessageText('Peña no encontrada.', menuPrincipal());
+  ctx.editMessageText(`¿Seguro que quieres borrar "${nombre}" (${pena.tipo})?`, Markup.inlineKeyboard([
+    [Markup.button.callback('✅ Sí, borrar', `borrar_ok_${encodeURIComponent(nombre)}`),
+     Markup.button.callback('❌ No', `pena_det_${encodeURIComponent(nombre)}`)],
+  ]));
+});
+
+bot.action(/^borrar_ok_(.+)$/, async (ctx) => {
+  const nombre = decodeURIComponent(ctx.match[1]);
+  const res = eliminarPena(nombre);
+  ctx.editMessageText(res.ok ? `✅ Peña "${nombre}" borrada.` : `❌ ${res.error}`, Markup.inlineKeyboard([
+    [Markup.button.callback('📋 Ver Peñas', 'menu_penas')],
+    [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+  ]));
+});
+
+bot.action('menu_ranking', async (ctx) => {
+  try {
+    const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
+    const rkQ = formatearRanking('quiniela', result.quiniela, premios);
+    const rkG = formatearRanking('quinigol', result.quinigol, premios);
+    let msg = '';
+    if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
+    else msg += rkQ + '\n';
+    if (rkG.includes('No hay')) msg += '\n❌ No hay peñas de quinigol.';
+    else msg += '\n' + rkG;
+    ctx.editMessageText(msg, volverBtn());
+  } catch (e) {
+    ctx.editMessageText(`Error al obtener ranking: ${e.message}`, volverBtn());
+  }
+});
+
+bot.action('menu_partidos', async (ctx) => {
+  const msg = await generarPartidos();
+  ctx.editMessageText(msg, volverBtn());
+});
+
+bot.action('menu_jornada', async (ctx) => {
+  const msg = await generarJornada();
+  ctx.editMessageText(msg, volverBtn());
+});
+
+bot.action('menu_resumen', async (ctx) => {
+  const msg = await generarResumen();
+  ctx.editMessageText(msg, volverBtn());
+});
+
+bot.action('menu_crear', (ctx) => {
+  ctx.editMessageText('¿De qué tipo es la peña?', Markup.inlineKeyboard([
+    Markup.button.callback('🔵 Quiniela', 'wizard_tipo_quiniela'),
+    Markup.button.callback('🟢 Quinigol', 'wizard_tipo_quinigol'),
+    Markup.button.callback('❌ Cancelar', 'menu_principal'),
+  ]));
+});
+
+bot.action('menu_stop', (ctx) => {
+  chatIDs.delete(ctx.chat.id);
+  saveChats();
+  ctx.editMessageText('Dejaste de recibir notis. Usa /start para volver.', Markup.inlineKeyboard([
+    [Markup.button.callback('🏠 Reiniciar', 'menu_principal')],
+  ]));
 });
 
 // ===== COMANDOS =====
@@ -170,14 +307,8 @@ bot.action(/^wizard_nocargar_(.+)$/, (ctx) => {
 bot.start((ctx) => {
   chatIDs.add(ctx.chat.id);
   saveChats();
-  const isPrivate = ctx.chat.type === 'private';
-  if (isPrivate) {
-    ctx.reply(
-      '¡Bienvenido al LiveScore Bot! ⚽\n\n' +
-      'Te avisaré de cada gol y cómo afecta a tus peñas.\n\n' +
-      'Usa el menú de abajo para navegar 👇',
-      MENU
-    );
+  if (ctx.chat.type === 'private') {
+    ctx.reply('¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.', menuPrincipal());
   } else {
     ctx.reply(
       '✅ ¡LiveScore Bot activo en el grupo!\n\n' +
@@ -195,7 +326,7 @@ bot.start((ctx) => {
 });
 
 bot.help((ctx) => ctx.reply(
-  '📋 Comandos:\n' +
+  '📋 Comandos (o usa los botones en privado):\n' +
   '/ranking - Ranking con premios estimados\n' +
   '/resumen - Estado global de peñas\n' +
   '/partidos - Partidos en vivo\n' +
@@ -206,7 +337,7 @@ bot.help((ctx) => ctx.reply(
   '/borrar_pena NOMBRE - Borrar peña\n' +
   '/boleto PEÑA # - Ver boleto visual\n' +
   '/stop - Darse de baja de notis',
-  ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard()
+  ctx.chat.type === 'private' ? Markup.removeKeyboard() : Markup.removeKeyboard()
 ));
 
 // ===== FUNCIONES REUTILIZABLES =====
@@ -247,7 +378,7 @@ async function generarJornada() {
 
 async function generarListaPenas() {
   const lista = listarPenas();
-  if (lista.length === 0) return 'No hay peñas. Pulsa "➕ Crear Peña".';
+  if (lista.length === 0) return 'No hay peñas. Usa ➕ Crear Peña en el menú.';
   const result = await obtenerPartidosEnVivo();
   return '📊 PEÑAS\n\n' + lista.map(p => {
     const e = escrutarPena(p.nombre, p.tipo === 'quiniela' ? result.quiniela : result.quinigol);
@@ -273,7 +404,7 @@ async function generarResumen() {
       return e ? `${p.nombre}: ${e.vivas}✅ ${e.muertas}💀 (${e.total})` : `${p.nombre}: sin datos`;
     }).join('\n');
   }
-  return msg || 'No hay jugadas ni peñas. Pulsa "➕ Crear Peña".';
+  return msg || 'No hay jugadas ni peñas. Usa ➕ Crear Peña en el menú.';
 }
 
 async function generarPartidos() {
@@ -319,25 +450,25 @@ bot.command('pena', async (ctx) => {
   if (!nombre) {
     const lista = listarPenas();
     if (lista.length === 0) return ctx.reply('No hay peñas.', kb(ctx));
-    return ctx.reply('Escribe /pena <nombre>\nPeñas: ' + lista.map(p => p.nombre).join(', '), kb(ctx));
+    return ctx.reply('Peñas: ' + lista.map(p => p.nombre).join(', ') + '\nUsa /pena <nombre> o los botones en privado.', ctx.chat.type === 'private' ? Markup.inlineKeyboard([[Markup.button.callback('📋 Ver Peñas', 'menu_penas')]]) : kb(ctx));
   }
   const result = await obtenerPartidosEnVivo();
   const pena = obtenerPena(nombre);
-  if (!pena) return ctx.reply('Peña no encontrada.', kb(ctx));
+  if (!pena) return ctx.reply('Peña no encontrada.', ctx.chat.type === 'private' ? Markup.inlineKeyboard([[Markup.button.callback('🏠 Menú', 'menu_principal')]]) : kb(ctx));
 
-  // Escrutinio resumen
   const e = escrutarPena(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
   let msg = '';
   if (e) {
     msg = `📊 ${e.nombre} (${e.tipo})\nTotal: ${e.total} | Vivas: ${e.vivas} | Muertas: ${e.muertas}\n\n`;
     msg += formatearCategorias(e.categorias, e.tipo === 'quiniela' ? 15 : 6);
   }
-
-  // Mejores columnas
   const cols = formatearMejoresColumnas(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
   if (cols.ok) msg += '\n\n' + cols.msg;
 
-  ctx.reply(msg, kb(ctx));
+  ctx.reply(msg, ctx.chat.type === 'private' ? Markup.inlineKeyboard([
+    [Markup.button.callback('📄 Ver Boleto #1', `boleto_${encodeURIComponent(nombre)}_1`)],
+    [Markup.button.callback('🏠 Menú', 'menu_principal')],
+  ]) : kb(ctx));
 });
 
 bot.command('cargar_pena', async (ctx) => {
@@ -346,7 +477,9 @@ bot.command('cargar_pena', async (ctx) => {
   const pena = obtenerPena(nombre);
   if (!pena) return ctx.reply(`No existe "${nombre}".`, kb(ctx));
   ctx.session.esperandoPena = nombre;
-  ctx.reply(`Envía el archivo .txt para "${nombre}" (${pena.tipo}).`, kb(ctx));
+  ctx.reply(`Envía el archivo .txt para "${nombre}" (${pena.tipo}).`, ctx.chat.type === 'private' ? Markup.inlineKeyboard([
+    [Markup.button.callback('🔙 Cancelar', `pena_det_${encodeURIComponent(nombre)}`)],
+  ]) : kb(ctx));
 });
 
 bot.command('borrar_pena', async (ctx) => {
@@ -354,27 +487,17 @@ bot.command('borrar_pena', async (ctx) => {
   if (!nombre) {
     const lista = listarPenas();
     if (lista.length === 0) return ctx.reply('No hay peñas.', kb(ctx));
-    return ctx.reply('Uso: /borrar_pena <nombre>\nPeñas: ' + lista.map(p => p.nombre).join(', '), kb(ctx));
+    return ctx.reply('Peñas: ' + lista.map(p => p.nombre).join(', ') + '\nUsa /borrar_pena <nombre>.', kb(ctx));
   }
   const pena = obtenerPena(nombre);
   if (!pena) return ctx.reply(`No existe "${nombre}".`, kb(ctx));
   ctx.reply(
     `¿Seguro que quieres borrar la peña "${nombre}" (${pena.tipo})?`,
     Markup.inlineKeyboard([
-      Markup.button.callback('✅ Sí, borrar', `borrar_${nombre}`),
-      Markup.button.callback('❌ No', 'borrar_no'),
+      [Markup.button.callback('✅ Sí, borrar', `borrar_ok_${encodeURIComponent(nombre)}`)],
+      [Markup.button.callback('❌ No', `pena_det_${encodeURIComponent(nombre)}`)],
     ])
   );
-});
-
-bot.action(/^borrar_(.+)$/, async (ctx) => {
-  const nombre = ctx.match[1];
-  const res = eliminarPena(nombre);
-  ctx.editMessageText(res.ok ? `✅ Peña "${nombre}" borrada.` : `❌ ${res.error}`);
-});
-
-bot.action('borrar_no', (ctx) => {
-  ctx.editMessageText('Cancelado.');
 });
 
 bot.command('boleto', async (ctx) => {
@@ -386,25 +509,31 @@ bot.command('boleto', async (ctx) => {
   const partidos = obtenerPena(nombre)?.tipo === 'quiniela' ? result.quiniela : result.quinigol;
   if (!partidos) return ctx.reply('Peña no encontrada.', kb(ctx));
   const b = formatearBoleto(nombre, num, partidos);
-  ctx.reply(b.msg, { parse_mode: 'Markdown', ...kb(ctx) });
+  ctx.reply(b.msg, { parse_mode: 'Markdown', ...(ctx.chat.type === 'private' ? Markup.inlineKeyboard([
+    [Markup.button.callback('🏠 Menú', 'menu_principal')],
+  ]) : kb(ctx)) });
 });
 
 bot.command('ranking', async (ctx) => {
-  const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
-  const rkQ = formatearRanking('quiniela', result.quiniela, premios);
-  const rkG = formatearRanking('quinigol', result.quinigol, premios);
-  let msg = '';
-  if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
-  else msg += rkQ + '\n';
-  if (rkG.includes('No hay')) msg += '\n❌ No hay peñas de quinigol.';
-  else msg += '\n' + rkG;
-  ctx.reply(msg, kb(ctx));
+  try {
+    const [result, premios] = await Promise.all([obtenerPartidosEnVivo(), obtenerDatosPremios()]);
+    const rkQ = formatearRanking('quiniela', result.quiniela, premios);
+    const rkG = formatearRanking('quinigol', result.quinigol, premios);
+    let msg = '';
+    if (rkQ.includes('No hay')) msg += '❌ No hay peñas de quiniela.\n';
+    else msg += rkQ + '\n';
+    if (rkG.includes('No hay')) msg += '\n❌ No hay peñas de quinigol.';
+    else msg += '\n' + rkG;
+    ctx.reply(msg, ctx.chat.type === 'private' ? Markup.inlineKeyboard([[Markup.button.callback('🏠 Menú', 'menu_principal')]]) : kb(ctx));
+  } catch (e) {
+    ctx.reply(`Error: ${e.message}`, kb(ctx));
+  }
 });
 
 bot.command('stop', (ctx) => {
   chatIDs.delete(ctx.chat.id);
   saveChats();
-  ctx.reply('Dejaste de recibir notis. Usa /start para volver.', kb(ctx));
+  ctx.reply('Dejaste de recibir notis. Usa /start para volver.', ctx.chat.type === 'private' ? Markup.inlineKeyboard([[Markup.button.callback('🏠 Menú Principal', 'menu_principal')]]) : kb(ctx));
 });
 
 // ===== MANEJO DE MENSAJES (menú solo privado + wizard) =====
@@ -426,25 +555,12 @@ bot.on('text', async (ctx) => {
     const tipo = s.wizardTipo;
     s.wizard = null;
     return ctx.reply(
-      `✅ Peña "${nombre}" (${tipo}) creada.\n¿Quieres cargar jugadas ahora?`,
+      `✅ Peña "${nombre}" (${tipo}) creada.`,
       Markup.inlineKeyboard([
-        Markup.button.callback('📁 Sí, enviar archivo', `wizard_cargar_${nombre}`),
-        Markup.button.callback('❌ No, después', `wizard_nocargar_${nombre}`),
+        [Markup.button.callback(`📊 Ir a ${nombre}`, `pena_det_${encodeURIComponent(nombre)}`)],
+        [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
       ])
     );
-  }
-
-  // Menú (solo en privado)
-  if (isPrivate) {
-    if (txt === '➕ Crear Peña') return iniciarWizard(ctx);
-    if (txt === '📋 Peñas') return ctx.reply(await generarListaPenas(), MENU);
-    if (txt === '📊 Resumen') return ctx.reply(await generarResumen(), MENU);
-    if (txt === '⚽ Partidos') return ctx.reply(await generarPartidos(), MENU);
-    if (txt === '📅 Jornada') return ctx.reply(await generarJornada(), MENU);
-    if (txt === '❌ Stop') {
-      chatIDs.delete(ctx.chat.id); saveChats();
-      return ctx.reply('Dejaste de recibir notis. Usa /start para volver.', MENU);
-    }
   }
 
   if (s.esperandoArchivo) ctx.reply('Envía el archivo .txt, no texto. Usa 📎 > Archivo.', MENU);
@@ -469,25 +585,21 @@ bot.on('document', async (ctx) => {
       const lineas = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('//'));
       const res = cargarJugadasPena(nombrePena, lineas);
       s.esperandoPena = null;
-      return ctx.reply(res.ok ? `✅ ${res.total} jugadas cargadas en "${nombrePena}".` : `❌ ${res.error}`, MENU);
+      const ok = res.ok;
+      ctx.reply(ok ? `✅ ${res.total} jugadas cargadas en "${nombrePena}".` : `❌ ${res.error}`, Markup.inlineKeyboard([
+        [Markup.button.callback(`📊 Ir a ${nombrePena}`, `pena_det_${encodeURIComponent(nombrePena)}`)],
+        [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+      ]));
+      return;
     }
 
-    if (tipo) {
-      const jugadas = parsearMultiplesJugadas(text, tipo);
-      if (jugadas.length === 0) return ctx.reply(`No pude parsear jugadas de ${tipo}.`, MENU);
-
-      const destPath = join(__dirname, '..', 'datos', `jugadas_${tipo}.txt`);
-      writeFileSync(destPath, text, 'utf-8');
-      const lineas = text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#') && !l.startsWith('//'));
-      if (tipo === 'quiniela') config.quinielaJugadas = lineas;
-      else config.quinigolJugadas = lineas;
-      s.esperandoArchivo = null;
-      return ctx.reply(`✅ Cargadas ${jugadas.length} jugadas de ${tipo}.`, MENU);
-    }
-
-    ctx.reply('Usa "➕ Crear Peña" o /cargar_pena <nombre> primero.', MENU);
+    ctx.reply('Usa "➕ Crear Peña" o /cargar_pena <nombre> primero.', Markup.inlineKeyboard([
+      [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+    ]));
   } catch (err) {
-    ctx.reply(`Error: ${err.message}`, MENU);
+    ctx.reply(`Error: ${err.message}`, Markup.inlineKeyboard([
+      [Markup.button.callback('🏠 Menú Principal', 'menu_principal')],
+    ]));
   }
 });
 
