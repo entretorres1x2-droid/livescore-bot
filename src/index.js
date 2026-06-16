@@ -28,28 +28,30 @@ function volverBtn(texto = '🏠 Menú Principal') {
 }
 
 let partidosAnteriores = [];
-let chatIDs = new Set();
-const DATA_FILE = join(__dirname, '..', 'datos', 'chats.json');
+let adminId = null;
+let targetGroupId = null;
+const DATA_FILE = join(__dirname, '..', 'datos', 'config.json');
 
-function loadChats() {
+function loadData() {
   try {
     if (existsSync(DATA_FILE)) {
       const d = JSON.parse(readFileSync(DATA_FILE, 'utf-8'));
-      chatIDs = new Set(d.chats || []);
+      adminId = d.adminId || null;
+      targetGroupId = d.targetGroupId || null;
     }
   } catch {}
 }
 
-function saveChats() {
+function saveData() {
   try {
     if (!existsSync(join(__dirname, '..', 'datos'))) {
       mkdirSync(join(__dirname, '..', 'datos'), { recursive: true });
     }
-    writeFileSync(DATA_FILE, JSON.stringify({ chats: [...chatIDs] }));
+    writeFileSync(DATA_FILE, JSON.stringify({ adminId, targetGroupId }));
   } catch {}
 }
 
-loadChats();
+loadData();
 
 function formatearEscrito(e) {
   const lineas = e.escrutinio.map(j =>
@@ -80,21 +82,22 @@ async function checkScores() {
 
     const premios = await obtenerDatosPremios();
 
-    for (const p of eventos.inicio) {
-      for (const chatId of chatIDs) {
-        try { await bot.telegram.sendMessage(chatId, `🟢 COMENZÓ: ${p.local} vs ${p.visitante}`); } catch {}
+    async function enviarAlGrupo(msg, extra) {
+      if (targetGroupId) {
+        try { await bot.telegram.sendMessage(targetGroupId, msg, extra || {}); } catch {}
       }
+    }
+
+    for (const p of eventos.inicio) {
+      await enviarAlGrupo(`🟢 COMENZÓ: ${p.local} vs ${p.visitante}`);
     }
 
     for (const p of eventos.final) {
-      for (const chatId of chatIDs) {
-        try { await bot.telegram.sendMessage(chatId, `🏁 FINAL: ${p.local} ${p.golesLocal}-${p.golesVisitante} ${p.visitante}`); } catch {}
-      }
+      await enviarAlGrupo(`🏁 FINAL: ${p.local} ${p.golesLocal}-${p.golesVisitante} ${p.visitante}`);
     }
 
-    // Mostrar escrutinio y ranking tras cualquier evento
-    for (const chatId of chatIDs) {
-      await mostrarRanking(chatId, result, premios);
+    if (eventos.inicio.length > 0 || eventos.final.length > 0) {
+      await mostrarRanking(targetGroupId, result, premios);
     }
 
     for (const gol of goles) {
@@ -105,15 +108,8 @@ async function checkScores() {
         config.quinigolJugadas.map(j => parseQuinigolJugada(j)).filter(Boolean)
       );
       const msgGlobal = await generarComentarioIA(infoGol, impactoGlobal);
-
-      for (const chatId of chatIDs) {
-        try { await bot.telegram.sendMessage(chatId, msgGlobal, { parse_mode: 'HTML' }); }
-        catch (err) { if (err?.response?.error_code === 403) { chatIDs.delete(chatId); saveChats(); } }
-      }
-
-      for (const chatId of chatIDs) {
-        await mostrarRanking(chatId, result, premios);
-      }
+      await enviarAlGrupo(msgGlobal, { parse_mode: 'HTML' });
+      await mostrarRanking(targetGroupId, result, premios);
     }
 
     partidosAnteriores = result.todos;
@@ -286,37 +282,39 @@ bot.action('menu_crear', (ctx) => {
 });
 
 bot.action('menu_stop', (ctx) => {
-  chatIDs.delete(ctx.chat.id);
-  saveChats();
-  ctx.editMessageText('Dejaste de recibir notis. Usa /start para volver.', Markup.inlineKeyboard([
-    [Markup.button.callback('🏠 Reiniciar', 'menu_principal')],
+  ctx.editMessageText('Para dejar de recibir notis en el grupo, elimíname del grupo. Las notis van al grupo, no aquí.', Markup.inlineKeyboard([
+    [Markup.button.callback('🏠 Menú', 'menu_principal')],
   ]));
 });
 
 // ===== COMANDOS =====
 
-bot.start((ctx) => {
-  chatIDs.add(ctx.chat.id);
-  saveChats();
-  if (ctx.chat.type === 'private') {
-    ctx.reply(
-      '¡Bienvenido al LiveScore Bot! ⚽\n\nTe avisaré de cada gol y cómo afecta a tus peñas.\n\nUsa los botones de abajo 👇',
-      MENU
-    );
-  } else {
-    ctx.reply(
-      '✅ ¡LiveScore Bot activo en el grupo!\n\n' +
-      'Recibiréis notificaciones de cada gol y cómo afecta al escrutinio.\n\n' +
-      'Comandos disponibles:\n' +
-      '/ranking - Clasificación de peñas\n' +
-      '/resumen - Estado global\n' +
-      '/partidos - En vivo\n' +
-      '/jornada - APIs y estado\n' +
-      '/penas - Listar peñas\n' +
-      '/pena NOMBRE - Detalle de peña\n' +
-      '/stop - Dejar de recibir notis'
-    );
+// Al añadir el bot a un grupo, lo guarda como destino de notis
+bot.on('my_chat_member', async (ctx) => {
+  const update = ctx.myChatMember;
+  if (!update) return;
+  const chat = update.chat;
+  if (chat.type === 'group' || chat.type === 'supergroup') {
+    if (update.new_chat_member.status === 'member' || update.new_chat_member.status === 'administrator') {
+      targetGroupId = chat.id;
+      saveData();
+      if (adminId) await bot.telegram.sendMessage(adminId, `✅ Grupo "${chat.title}" vinculado. Las notis irán allí.`);
+    }
   }
+});
+
+bot.start((ctx) => {
+  if (ctx.chat.type !== 'private') {
+    return ctx.reply('🤖 Este bot se controla por privado @SS_Goles_bot. Las notificaciones llegarán aquí automáticamente.');
+  }
+  adminId = ctx.chat.id;
+  saveData();
+  ctx.reply(
+    '¡Bienvenido al LiveScore Bot! ⚽\n\n' +
+    'Te avisaré de cada gol y cómo afecta a tus peñas.\n' +
+    (targetGroupId ? `📨 Notis enviándose al grupo configurado.` : '📌 Para enviar notis a un grupo, añádeme allí.'),
+    MENU
+  );
 });
 
 bot.help((ctx) => ctx.reply(
@@ -416,20 +414,10 @@ function kb(ctx) {
   return ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard();
 }
 
-// Middleware: solo admins en grupos
+// En grupos solo ignoramos mensajes (el bot solo escribe)
 bot.use(async (ctx, next) => {
-  const tipo = ctx.chat?.type;
-  if (tipo === 'group' || tipo === 'supergroup') {
-    if (ctx.message?.text?.startsWith('/')) {
-      try {
-        const member = await ctx.getChatMember(ctx.from.id);
-        if (member.status !== 'administrator' && member.status !== 'creator') {
-          return ctx.reply('⛽ Solo administradores del grupo pueden usar comandos.', kb(ctx));
-        }
-      } catch {
-        // Si falla la consulta, permitimos
-      }
-    }
+  if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') {
+    return; // No procesar nada
   }
   return next();
 });
@@ -525,9 +513,10 @@ bot.command('ranking', async (ctx) => {
 });
 
 bot.command('stop', (ctx) => {
-  chatIDs.delete(ctx.chat.id);
-  saveChats();
-  ctx.reply('Dejaste de recibir notis. Usa /start para volver.', ctx.chat.type === 'private' ? Markup.inlineKeyboard([[Markup.button.callback('🏠 Menú Principal', 'menu_principal')]]) : kb(ctx));
+  if (ctx.chat.type !== 'private') return;
+  ctx.reply('Las notificaciones van al grupo configurado. Para detenerlas, elimíname del grupo.', Markup.inlineKeyboard([
+    [Markup.button.callback('🏠 Menú', 'menu_principal')],
+  ]));
 });
 
 // ===== MANEJO DE MENSAJES (menú solo privado + wizard) =====
@@ -587,8 +576,7 @@ bot.on('text', async (ctx) => {
     if (txt === '📊 Resumen') return ctx.reply(await generarResumen(), MENU);
     if (txt === '➕ Crear Peña') return iniciarWizard(ctx);
     if (txt === '❌ Detener Notificaciones') {
-      chatIDs.delete(ctx.chat.id); saveChats();
-      return ctx.reply('Dejaste de recibir notis. Usa /start para volver.', Markup.removeKeyboard());
+      return ctx.reply('Las notificaciones van al grupo configurado. Para detenerlas, elimíname del grupo.', MENU);
     }
   }
 
