@@ -291,6 +291,24 @@ function kb(ctx) {
   return ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard();
 }
 
+// Middleware: solo admins en grupos
+bot.use(async (ctx, next) => {
+  const tipo = ctx.chat?.type;
+  if (tipo === 'group' || tipo === 'supergroup') {
+    if (ctx.message?.text?.startsWith('/')) {
+      try {
+        const member = await ctx.getChatMember(ctx.from.id);
+        if (member.status !== 'administrator' && member.status !== 'creator') {
+          return ctx.reply('⛽ Solo administradores del grupo pueden usar comandos.', kb(ctx));
+        }
+      } catch {
+        // Si falla la consulta, permitimos
+      }
+    }
+  }
+  return next();
+});
+
 bot.command('jornada', async (ctx) => ctx.reply(await generarJornada(), kb(ctx)));
 bot.command('penas', async (ctx) => ctx.reply(await generarListaPenas(), kb(ctx)));
 bot.command('resumen', async (ctx) => ctx.reply(await generarResumen(), kb(ctx)));
