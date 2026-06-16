@@ -494,8 +494,9 @@ bot.launch().then(() => {
   console.log('🤖 Bot de LiveScore Quiniela iniciado!');
   startPolling();
 }).catch(err => {
-  console.error('Error al iniciar el bot:', err);
-  process.exit(1);
+  console.error('Error al iniciar el bot (no crítico):', err.message);
+  // Health check sigue funcionando aunque el bot falle
+  startPolling();
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
