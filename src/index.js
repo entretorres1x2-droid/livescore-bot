@@ -169,24 +169,41 @@ bot.action(/^wizard_nocargar_(.+)$/, (ctx) => {
 bot.start((ctx) => {
   chatIDs.add(ctx.chat.id);
   saveChats();
-  ctx.reply(
-    '¡Bienvenido al LiveScore Bot! ⚽\n\n' +
-    'Te avisaré de cada gol y cómo afecta a tus peñas.\n\n' +
-    'Usa el menú de abajo para navegar 👇',
-    MENU
-  );
+  const isPrivate = ctx.chat.type === 'private';
+  if (isPrivate) {
+    ctx.reply(
+      '¡Bienvenido al LiveScore Bot! ⚽\n\n' +
+      'Te avisaré de cada gol y cómo afecta a tus peñas.\n\n' +
+      'Usa el menú de abajo para navegar 👇',
+      MENU
+    );
+  } else {
+    ctx.reply(
+      '✅ ¡LiveScore Bot activo en el grupo!\n\n' +
+      'Recibiréis notificaciones de cada gol y cómo afecta al escrutinio.\n\n' +
+      'Comandos disponibles:\n' +
+      '/ranking - Clasificación de peñas\n' +
+      '/resumen - Estado global\n' +
+      '/partidos - En vivo\n' +
+      '/jornada - APIs y estado\n' +
+      '/penas - Listar peñas\n' +
+      '/pena NOMBRE - Detalle de peña\n' +
+      '/stop - Dejar de recibir notis'
+    );
+  }
 });
 
 bot.help((ctx) => ctx.reply(
   '📋 Comandos:\n' +
-  '➕ Crear Peña - Asistente guiado\n' +
-  '📋 Peñas - Listar todas\n' +
-  '🏆 /ranking - Ranking de peñas\n' +
-  '📊 Resumen - Estado global\n' +
-  '⚽ Partidos - En vivo\n' +
-  '📅 Jornada - APIs y estado\n' +
-  '❌ Stop - Darse de baja',
-  MENU
+  '/ranking - Ranking con premios estimados\n' +
+  '/resumen - Estado global de peñas\n' +
+  '/partidos - Partidos en vivo\n' +
+  '/jornada - APIs y estado de la jornada\n' +
+  '/penas - Listar todas las peñas\n' +
+  '/pena NOMBRE - Detalle de una peña\n' +
+  '/cargar_pena NOMBRE - Subir jugadas\n' +
+  '/stop - Darse de baja de notis',
+  ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard()
 ));
 
 // ===== FUNCIONES REUTILIZABLES =====
@@ -267,37 +284,41 @@ async function generarPartidos() {
 
 // ===== COMANDOS =====
 
-bot.command('jornada', async (ctx) => ctx.reply(await generarJornada(), MENU));
-bot.command('penas', async (ctx) => ctx.reply(await generarListaPenas(), MENU));
-bot.command('resumen', async (ctx) => ctx.reply(await generarResumen(), MENU));
-bot.command('partidos', async (ctx) => ctx.reply(await generarPartidos(), MENU));
+function kb(ctx) {
+  return ctx.chat.type === 'private' ? MENU : Markup.removeKeyboard();
+}
+
+bot.command('jornada', async (ctx) => ctx.reply(await generarJornada(), kb(ctx)));
+bot.command('penas', async (ctx) => ctx.reply(await generarListaPenas(), kb(ctx)));
+bot.command('resumen', async (ctx) => ctx.reply(await generarResumen(), kb(ctx)));
+bot.command('partidos', async (ctx) => ctx.reply(await generarPartidos(), kb(ctx)));
 
 bot.command('pena', async (ctx) => {
   const nombre = ctx.message.text.slice('/pena'.length).trim();
   if (!nombre) {
     const lista = listarPenas();
-    if (lista.length === 0) return ctx.reply('No hay peñas. Pulsa "➕ Crear Peña".', MENU);
-    return ctx.reply('Escribe /pena <nombre>\nPeñas: ' + lista.map(p => p.nombre).join(', '), MENU);
+    if (lista.length === 0) return ctx.reply('No hay peñas.', kb(ctx));
+    return ctx.reply('Escribe /pena <nombre>\nPeñas: ' + lista.map(p => p.nombre).join(', '), kb(ctx));
   }
   const result = await obtenerPartidosEnVivo();
   const pena = obtenerPena(nombre);
-  if (!pena) return ctx.reply('Peña no encontrada.', MENU);
+  if (!pena) return ctx.reply('Peña no encontrada.', kb(ctx));
   const e = escrutarPena(nombre, pena.tipo === 'quiniela' ? result.quiniela : result.quinigol);
-  if (!e) return ctx.reply('Error.', MENU);
+  if (!e) return ctx.reply('Error.', kb(ctx));
 
   let msg = `📊 ${e.nombre} (${e.tipo})\nTotal: ${e.total} | Vivas: ${e.vivas} | Muertas: ${e.muertas}\n\n`;
   msg += formatearCategorias(e.categorias, e.tipo === 'quiniela' ? 15 : 6);
   if (e.escrutinio.length <= 20) msg += '\n\n' + formatearEscrito(e);
-  ctx.reply(msg, MENU);
+  ctx.reply(msg, kb(ctx));
 });
 
 bot.command('cargar_pena', async (ctx) => {
   const nombre = ctx.message.text.slice('/cargar_pena'.length).trim();
-  if (!nombre) return ctx.reply('Uso: /cargar_pena <nombre>', MENU);
+  if (!nombre) return ctx.reply('Uso: /cargar_pena <nombre>', kb(ctx));
   const pena = obtenerPena(nombre);
-  if (!pena) return ctx.reply(`No existe "${nombre}".`, MENU);
+  if (!pena) return ctx.reply(`No existe "${nombre}".`, kb(ctx));
   ctx.session.esperandoPena = nombre;
-  ctx.reply(`Envía el archivo .txt para "${nombre}" (${pena.tipo}).`, MENU);
+  ctx.reply(`Envía el archivo .txt para "${nombre}" (${pena.tipo}).`, kb(ctx));
 });
 
 bot.command('ranking', async (ctx) => {
@@ -309,20 +330,24 @@ bot.command('ranking', async (ctx) => {
   else msg += rkQ + '\n';
   if (rkG.includes('No hay')) msg += '\n❌ No hay peñas de quinigol.';
   else msg += '\n' + rkG;
-  ctx.reply(msg, MENU);
+  ctx.reply(msg, kb(ctx));
 });
 
 bot.command('stop', (ctx) => {
   chatIDs.delete(ctx.chat.id);
   saveChats();
-  ctx.reply('Dejaste de recibir notis. Usa /start para volver.', MENU);
+  ctx.reply('Dejaste de recibir notis. Usa /start para volver.', kb(ctx));
 });
 
-// ===== MANEJO DE MENSAJES DE TEXTO (menú + wizard) =====
+// ===== MANEJO DE MENSAJES (menú solo privado + wizard) =====
 
 bot.on('text', async (ctx) => {
   const txt = ctx.message.text;
   const s = ctx.session = ctx.session || {};
+  const isPrivate = ctx.chat.type === 'private';
+
+  // En grupos ignorar texto que no sea comando
+  if (!isPrivate && !txt.startsWith('/')) return;
 
   if (s.wizard === 'esperando_nombre') {
     const nombre = txt.trim();
@@ -341,13 +366,18 @@ bot.on('text', async (ctx) => {
     );
   }
 
-  // Menú
-  if (txt === '➕ Crear Peña') return iniciarWizard(ctx);
-  if (txt === '📋 Peñas') return ctx.reply(await generarListaPenas(), MENU);
-  if (txt === '📊 Resumen') return ctx.reply(await generarResumen(), MENU);
-  if (txt === '⚽ Partidos') return ctx.reply(await generarPartidos(), MENU);
-  if (txt === '📅 Jornada') return ctx.reply(await generarJornada(), MENU);
-  if (txt === '❌ Stop') { chatIDs.delete(ctx.chat.id); saveChats(); return ctx.reply('Dejaste de recibir notis. Usa /start para volver.', MENU); }
+  // Menú (solo en privado)
+  if (isPrivate) {
+    if (txt === '➕ Crear Peña') return iniciarWizard(ctx);
+    if (txt === '📋 Peñas') return ctx.reply(await generarListaPenas(), MENU);
+    if (txt === '📊 Resumen') return ctx.reply(await generarResumen(), MENU);
+    if (txt === '⚽ Partidos') return ctx.reply(await generarPartidos(), MENU);
+    if (txt === '📅 Jornada') return ctx.reply(await generarJornada(), MENU);
+    if (txt === '❌ Stop') {
+      chatIDs.delete(ctx.chat.id); saveChats();
+      return ctx.reply('Dejaste de recibir notis. Usa /start para volver.', MENU);
+    }
+  }
 
   if (s.esperandoArchivo) ctx.reply('Envía el archivo .txt, no texto. Usa 📎 > Archivo.', MENU);
 });
