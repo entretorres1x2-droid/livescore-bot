@@ -531,6 +531,10 @@ async function iniciar() {
   if (usarWebhook) {
     await bot.telegram.setWebhook(RENDER_URL);
     console.log('Webhook configurado en', RENDER_URL);
+    // Re-set webhook cada 15s para vencer al bot viejo en JustRunMy
+    setInterval(() => {
+      bot.telegram.setWebhook(RENDER_URL).catch(() => {});
+    }, 15000);
   } else {
     await bot.launch();
     console.log('🤖 Bot iniciado (polling)');
