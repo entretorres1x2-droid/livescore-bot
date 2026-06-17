@@ -34,12 +34,11 @@ async function say(m) {
   if (admin && admin !== grupo) try { await bot.telegram.sendMessage(admin, m); } catch {}
 }
 async function sendOrEdit(msg, ref) {
-  // If we have a previous message, edit it; otherwise send new
   if (ref && ref.chatId && ref.messageId) {
-    try { await bot.telegram.editMessageText(ref.chatId, ref.messageId, null, msg, { parse_mode: 'MarkdownV2' }); return ref; } catch {}
+    try { await bot.telegram.editMessageText(ref.chatId, ref.messageId, null, msg, { parse_mode: 'MarkdownV2' }); return ref; } catch { }
   }
   if (grupo) {
-    try { const s = await bot.telegram.sendMessage(grupo, msg, { parse_mode: 'MarkdownV2' }); return { chatId: grupo, messageId: s.message_id }; } catch {}
+    try { const s = await bot.telegram.sendMessage(grupo, msg, { parse_mode: 'MarkdownV2' }); return { chatId: grupo, messageId: s.message_id }; } catch { }
   }
   return null;
 }
@@ -163,7 +162,6 @@ async function verificarAvance() {
 }
 
 // ── MAP ──
-function esc(g) { return g>=3?'M':String(g); }
 function map(p,i,tipo) {
   const loc = typeof p.local==='object'?p.local.nombre:p.local;
   const vis = typeof p.visitante==='object'?p.visitante.nombre:p.visitante;
@@ -203,8 +201,8 @@ function fmtBoleto(todos, tipo, j, tit) {
     const ft = p.estado==='post'||p.fin;
     const enVivo = p.estado==='in';
     let gL='-', gV='-', min='', em='', numEm='';
-    if (ft) { gL=p.gL!==null?esc(p.gL):'-'; gV=p.gV!==null?esc(p.gV):'-'; min='FT'; }
-    else if (enVivo) { gL=p.gL!==null?esc(p.gL):'0'; gV=p.gV!==null?esc(p.gV):'0'; min=p.min; numEm='🟢'; }
+    if (ft) { gL=p.gL!==null?String(p.gL):'-'; gV=p.gV!==null?String(p.gV):'-'; min='FT'; }
+    else if (enVivo) { gL=p.gL!==null?String(p.gL):'0'; gV=p.gV!==null?String(p.gV):'0'; min=p.min; numEm='🟢'; }
     else { min=(p.dia||'')+(p.hora?' '+p.hora:''); }
     const n2 = (numEm+String(p.num)).padEnd(4);
     const loc = pad(p.loc, w);
@@ -275,18 +273,13 @@ async function check() {
       if (p.estado==='post'&&old.estado!=='post') { huboEvento=true; await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`); }
     }
 
-    // Send / update boleto — use edit to simulate "blinking"
+    // Send / update boleto — edit on every poll for "blinking" effect
     const bQ = fmtBoleto(todos,'Quiniela',JQ,'⚽ QUINIELA');
     const bQG = fmtBoleto(todos,'Quinigol',JQG,'⚽ QUINIGOL');
     const msg = [bQ,bQG].filter(Boolean).join('\n\n');
-    
     if (todos.length && msg) {
-      if (!prev.length || huboEvento) {
-        const s = await sendOrEdit(msg, null);
-        if (s) msgRef = s;
-      } else {
-        await sendOrEdit(msg, msgRef);
-      }
+      const s = await sendOrEdit(msg, msgRef);
+      if (s) msgRef = s;
     }
 
     prev = todos;
