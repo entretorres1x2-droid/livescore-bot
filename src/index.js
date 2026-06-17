@@ -255,19 +255,35 @@ function buildBoletoFrom(data, blink = false) {
 
 // ── EVENTS ──
 const knownEvents = new Map(); // { matchId: Set(detailKey) }
+async function sayAnimated(frames, delay = 1800) {
+  if (!grupo) return;
+  try {
+    const s = await bot.telegram.sendMessage(grupo, frames[0]);
+    await new Promise(r => setTimeout(r, delay));
+    await bot.telegram.editMessageText(grupo, s.message_id, null, frames[1]);
+  } catch {}
+}
 const evMsg = {
-  'Goal': (d, pl) => `⚽ GOOOL de ${pl}!`,
-  'OwnGoal': (d, pl) => `😱 GOL EN CONTRA de ${pl}!`,
-  'Penalty': (d, pl) => `⚽ PENALTI de ${pl}!`,
-  'YellowCard': (d, pl) => `🟡 TARJETA AMARILLA ${pl}`,
-  'RedCard': (d, pl) => `🔴 TARJETA ROJA ${pl}`,
-  'YellowRedCard': (d, pl) => `🟡🔴 DOBLE AMARILLA ${pl}`,
-  'Substitution': (d, pl) => `🔄 Cambio: ${pl}`,
-  'ShootoutGoal': (d, pl) => `✅ ${pl} anota en penaltis`,
-  'ShootoutMiss': (d, pl) => `❌ ${pl} falla penalti`,
-  'ShotOnGoal': (d, pl) => `💥 ${pl} remata a puerta!`,
-  'Miss': (d, pl) => `❌ ${pl} remata fuera`,
-  'Save': (d, pl) => `🧤 ${pl} para!`,
+  'Goal': (d, pl, loc, vis, gL, gV) => [
+    `⚽⚽⚽⚽⚽ GOOOOOOL! ⚽⚽⚽⚽⚽\n${loc} ${gL}-${gV} ${vis}`,
+    `⚽ ${pl || loc} marca! ${loc} ${gL}-${gV} ${vis} (${d.clock.displayValue})`,
+  ],
+  'OwnGoal': (d, pl, loc, vis, gL, gV) => [
+    `😱😱😱 GOL EN CONTRA! 😱😱😱\n${loc} ${gL}-${gV} ${vis}`,
+    `😱 ${pl||vis} p.p. ${loc} ${gL}-${gV} ${vis} (${d.clock.displayValue})`,
+  ],
+  'YellowCard': (d, pl) => [
+    `🟡🟡 TARJETA AMARILLA 🟡🟡`,
+    `🟡 ${pl} (${d.clock.displayValue})`,
+  ],
+  'RedCard': (d, pl) => [
+    `🔴🔴🔴 TARJETA ROJA 🔴🔴🔴`,
+    `🔴 ${pl} expulsado! (${d.clock.displayValue})`,
+  ],
+  'YellowRedCard': (d, pl) => [
+    `🟡🔴 EXPULSADO 🟡🔴`,
+    `🟡🔴 ${pl} doble amarilla (${d.clock.displayValue})`,
+  ],
 };
 function detailKey(d) { return `${d.type.text}|${d.clock.displayValue}|${d.team.id}`; }
 function playerName(d) {
@@ -275,11 +291,10 @@ function playerName(d) {
   const subs = a.filter(x => x.displayName);
   return subs.length ? subs.map(x => x.displayName).join(', ') : '';
 }
-function formatEvent(d, loc, vis) {
-  const pl = playerName(d);
-  const fn = evMsg[d.type.text];
-  if (!fn) return null;
-  return fn(d, pl);
+function getScoreStr(p) {
+  const a = p.gL != null ? p.gL : 0;
+  const b = p.gV != null ? p.gV : 0;
+  return `${a}-${b}`;
 }
 
 // ── LIVE REFRESH ──
@@ -300,8 +315,12 @@ async function refreshLiveScores() {
         const k = detailKey(d);
         if (seen.has(k)) continue;
         seen.add(k);
-        const msg = formatEvent(d, p.loc, p.vis);
-        if (msg) await say(`[${p.tipo}] ${p.loc} vs ${p.vis}: ${msg} (${d.clock.displayValue})`);
+        const fn = evMsg[d.type.text];
+        if (!fn) continue;
+        const pl = playerName(d);
+        const sc = getScoreStr(p);
+        const frames = fn(d, pl, p.loc, p.vis, sc);
+        if (frames) await sayAnimated(frames, 2000);
       }
       if (m.est === 'post') {
         const gA = m.gL, gB = m.gV;
