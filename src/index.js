@@ -232,9 +232,14 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   l.push('```');
   return l.join('\n');
 }
-function buildBoleto(blink = false) {
+function buildBoletoBlink(blink = false) {
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
   const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
+  return [bQ, bQG].filter(Boolean).join('\n\n');
+}
+function buildBoletoFrom(data, blink = false) {
+  const bQ = fmtBoleto(data, 'Quiniela', JQ, '⚽ QUINIELA', blink);
+  const bQG = fmtBoleto(data, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
   return [bQ, bQG].filter(Boolean).join('\n\n');
 }
 
@@ -243,16 +248,21 @@ function startBlink() {
   if (blinkTimer) return;
   blinkTimer = setInterval(async () => {
     blinkState = !blinkState;
-    const msg = buildBoleto(blinkState);
-    if (msg && msgRef) {
-      const s = await sendOrEdit(msg, msgRef);
-      if (s) msgRef = s;
+    if (!msgRef || !grupo) return;
+    const msg = buildBoletoBlink(blinkState);
+    if (!msg) return;
+    try {
+      await bot.telegram.editMessageText(grupo, msgRef.messageId, null, msg, { parse_mode: 'MarkdownV2' });
+      console.log('blink', blinkState ? '🟡' : '🟢');
+    } catch (e) {
+      if (e.description?.includes('message to edit not found') || e.code === 400) msgRef = null;
+      else console.error('blink err:', e.description || e.message);
     }
   }, 1000);
-  console.log('🟢 Blink ON');
+  console.log('BLINK ON');
 }
 function stopBlink() {
-  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; console.log('🔴 Blink OFF'); }
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; console.log('BLINK OFF'); }
 }
 
 // ── MAIN ──
@@ -306,7 +316,7 @@ async function check() {
     }
 
     // Update boleto (always edit, never send new)
-    const msg = buildBoleto(blinkState);
+    const msg = buildBoletoFrom(todos, blinkState);
     if (todos.length && msg) {
       const s = await sendOrEdit(msg, msgRef);
       if (s) msgRef = s;
@@ -333,10 +343,10 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  ctx.reply(buildBoleto(false), { parse_mode: 'MarkdownV2' });
+  ctx.reply(buildBoletoBlink(false), { parse_mode: 'MarkdownV2' });
 });
 bot.command('partidos', async (ctx) => {
-  ctx.reply(buildBoleto(false), { parse_mode: 'MarkdownV2' });
+  ctx.reply(buildBoletoBlink(false), { parse_mode: 'MarkdownV2' });
 });
 
 // ── SERVER ──
