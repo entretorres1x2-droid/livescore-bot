@@ -242,19 +242,25 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   l.push('```');
   return l.join('\n');
 }
+function appendEvents(body) {
+  if (!liveEvents.length) return body;
+  const ev = liveEvents.slice(-8).map(e => e.line).join('\n');
+  return body + '\n\n═══ ⚽ EN VIVO ═══\n' + ev;
+}
 function buildBoletoBlink(blink = false) {
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
   const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
-  return [bQ, bQG].filter(Boolean).join('\n\n');
+  return appendEvents([bQ, bQG].filter(Boolean).join('\n\n'));
 }
 function buildBoletoFrom(data, blink = false) {
   const bQ = fmtBoleto(data, 'Quiniela', JQ, '⚽ QUINIELA', blink);
   const bQG = fmtBoleto(data, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
-  return [bQ, bQG].filter(Boolean).join('\n\n');
+  return appendEvents([bQ, bQG].filter(Boolean).join('\n\n'));
 }
 
 // ── EVENTS ──
-const knownEvents = new Map(); // { matchId: Set(detailKey) }
+const knownEvents = new Map();
+let liveEvents = []; // { line, tstamp }
 async function sayAnimated(frames, delay = 1800) {
   if (!grupo) return;
   try {
@@ -320,7 +326,17 @@ async function refreshLiveScores() {
         const pl = playerName(d);
         const sc = getScoreStr(p);
         const frames = fn(d, pl, p.loc, p.vis, sc);
-        if (frames) await sayAnimated(frames, 2000);
+        if (!frames) continue;
+        // Animated notification (separate message)
+        await sayAnimated(frames, 2000);
+        // Also add to boleto live events list (persistent)
+        const min = d.clock.displayValue;
+        const line = `${frames[1]}`;
+        liveEvents.push({ line, tstamp: Date.now(), match: `${p.loc} vs ${p.vis}` });
+        if (liveEvents.length > 10) liveEvents.shift();
+        // Clean events older than 30min
+        const cut = Date.now() - 30 * 60 * 1000;
+        while (liveEvents.length && liveEvents[0].tstamp < cut) liveEvents.shift();
       }
       if (m.est === 'post') {
         const gA = m.gL, gB = m.gV;
