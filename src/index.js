@@ -632,17 +632,23 @@ createServer(async (req, res) => {
   console.log(`Servidor en puerto ${PORT}`);
 });
 
+const API = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}`;
+
+async function apiCall(method, data = {}) {
+  const res = await fetch(`${API}/${method}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
 async function startBotPolling() {
   let offset = 0;
   console.log('🤖 Iniciando polling manual...');
+  // Eliminar cualquier webhook previo
+  try { await apiCall('deleteWebhook', { drop_pending_updates: true }); } catch(e) {}
   const poll = async () => {
     try {
-      const res = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/getUpdates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offset, timeout: 30, allowed_updates: ['message', 'callback_query', 'my_chat_member'] })
-      });
-      const data = await res.json();
+      const data = await apiCall('getUpdates', { offset, timeout: 30, allowed_updates: ['message', 'callback_query', 'my_chat_member'] });
       if (data.ok && data.result) {
         for (const u of data.result) {
           if (u.update_id >= offset) offset = u.update_id + 1;
@@ -656,9 +662,8 @@ async function startBotPolling() {
 }
 
 async function iniciar() {
-  await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-  startBotPolling();
-  console.log('🤖 Bot iniciado (polling manual)');
+  await startBotPolling();
+  console.log('🤖 Bot iniciado');
   setInterval(() => fetch(`http://localhost:${PORT}`).catch(() => {}), 180000);
   startPolling();
 }
@@ -667,6 +672,3 @@ iniciar().catch(err => {
   console.error('Error al iniciar:', err.message);
   startPolling();
 });
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
