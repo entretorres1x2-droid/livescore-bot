@@ -276,22 +276,16 @@ bot.on('my_chat_member', async (ctx) => {
 });
 
 bot.start((ctx) => {
-  if (ctx.chat.type !== 'private') return ctx.reply('Contrólame por privado @SS_Goles_bot');
   adminId = ctx.chat.id;
   saveData();
-  ctx.reply('✅ Bot activo. Añádeme a un grupo para recibir notificaciones en vivo de la jornada.');
+  ctx.reply('✅ Bot activo. Añádeme a un grupo para recibir notificaciones en vivo de la jornada.', sinTeclado);
 });
 
 bot.command('jornada', async (ctx) => {
-  ctx.reply(formatearJornada());
+  ctx.reply(formatearJornada(), sinTeclado);
 });
 bot.command('partidos', async (ctx) => {
-  ctx.reply(formatearJornada());
-});
-
-bot.use(async (ctx, next) => {
-  if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') return;
-  return next();
+  ctx.reply(formatearJornada(), sinTeclado);
 });
 
 // ---- SERVER ----
