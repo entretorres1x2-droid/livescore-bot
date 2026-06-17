@@ -1,13 +1,28 @@
 /**
- * Live Scores gratuito vía ESPN API (sin key) + Losilla API
+ * Live Scores gratuito vía ESPN API (sin key) + Losilla API + fallback local
  *
  * ESPN: https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard
  *   - Sin API key, gratis, datos en tiempo real
  *
  * Losilla: https://api.eduardolosilla.es/
- *   - Sin API key, gratis, partidos de Quiniela y Quinigol
+ *   - Actualmente requiere autenticación (401), se usa fallback local
  */
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import config from './config.js';
+
+const __dirname2 = dirname(fileURLToPath(import.meta.url));
+
+function cargarFallback(tipo) {
+  try {
+    const path = join(__dirname2, '..', 'datos', 'jornadas_fallback.json');
+    if (!existsSync(path)) return null;
+    const data = JSON.parse(readFileSync(path, 'utf-8'));
+    const key = `${config.TEMPORADA}_${tipo === 'quiniela' ? config.JORNADA_QUINIELA : config.JORNADA_QUINIGOL}_${tipo}`;
+    return data[key] || null;
+  } catch { return null; }
+}
 
 let cacheTodos = [];
 
@@ -214,6 +229,15 @@ function mapearPartido(p, i, tipo) {
   return { ...base, dia: p.horario?.dia, hora: p.horario?.hora };
 }
 
+async function obtenerJornadaDesdeAPI(tipo, jReal) {
+  const url = tipo === 'quiniela'
+    ? `https://api.eduardolosilla.es/escrutinios?num_jornada=${jReal}&num_temporada=${config.TEMPORADA}`
+    : `https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${config.TEMPORADA}&jornada=${jReal}`;
+  const data = await fetchJSON(url);
+  if (data?.partidos) return data.partidos.map((p, i) => mapearPartido(p, i, tipo));
+  return null;
+}
+
 export async function obtenerJornadaQuiniela() {
   const info = await detectarJornadaActual('quiniela');
   const jReal = info.jornada;
@@ -221,10 +245,20 @@ export async function obtenerJornadaQuiniela() {
     config.JORNADA_QUINIELA = String(jReal);
     console.log('Jornada Quiniela auto-detectada: J' + jReal + (info.activa ? '' : ' (temporada finalizada)'));
   }
-  const url = `https://api.eduardolosilla.es/escrutinios?num_jornada=${jReal}&num_temporada=${config.TEMPORADA}`;
-  const data = await fetchJSON(url);
-  if (!data?.partidos) return [];
-  return data.partidos.map((p, i) => mapearPartido(p, i, 'quiniela'));
+  const api = await obtenerJornadaDesdeAPI('quiniela', jReal);
+  if (api) return api;
+  const fallback = cargarFallback('quiniela');
+  if (fallback) return fallback.map((p, i) => ({
+    local: typeof p.local === 'object' ? p.local.nombre : p.local,
+    visitante: typeof p.visitante === 'object' ? p.visitante.nombre : p.visitante,
+    marcador: p.marcador || '-:-',
+    idx: p.idx || i,
+    finalizado: p.finalizado || false,
+    estado: p.estado,
+    dia: p.dia,
+    hora: p.hora,
+  }));
+  return [];
 }
 
 export async function obtenerJornadaQuinigol() {
@@ -234,10 +268,20 @@ export async function obtenerJornadaQuinigol() {
     config.JORNADA_QUINIGOL = String(jReal);
     console.log('Jornada Quinigol auto-detectada: J' + jReal + (info.activa ? '' : ' (temporada finalizada)'));
   }
-  const url = `https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${config.TEMPORADA}&jornada=${jReal}`;
-  const data = await fetchJSON(url);
-  if (!data?.partidos) return [];
-  return data.partidos.map((p, i) => mapearPartido(p, i, 'quinigol'));
+  const api = await obtenerJornadaDesdeAPI('quinigol', jReal);
+  if (api) return api;
+  const fallback = cargarFallback('quinigol');
+  if (fallback) return fallback.map((p, i) => ({
+    local: typeof p.local === 'object' ? p.local.nombre : p.local,
+    visitante: typeof p.visitante === 'object' ? p.visitante.nombre : p.visitante,
+    marcador: p.marcador || '-:-',
+    idx: p.idx || i,
+    finalizado: p.finalizado || false,
+    estado: p.estado,
+    dia: p.dia,
+    hora: p.hora,
+  }));
+  return [];
 }
 
 // --- ESPN API (ligas españolas + general) ---

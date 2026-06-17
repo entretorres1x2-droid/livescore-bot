@@ -1,0 +1,27 @@
+{
+  "2026_78_quinigol": [
+    { "idx": 1, "local": "Portugal", "visitante": "R.D. Congo", "marcador": "-:-", "dia": "17/06", "hora": "19:00", "finalizado": false, "estado": null },
+    { "idx": 2, "local": "Inglaterra", "visitante": "Croacia", "marcador": "-:-", "dia": "17/06", "hora": "22:00", "finalizado": false, "estado": null },
+    { "idx": 3, "local": "Ghana", "visitante": "Panamá", "marcador": "-:-", "dia": "18/06", "hora": "01:00", "finalizado": false, "estado": null },
+    { "idx": 4, "local": "Uzbekistán", "visitante": "Colombia", "marcador": "-:-", "dia": "18/06", "hora": "04:00", "finalizado": false, "estado": null },
+    { "idx": 5, "local": "Chequia", "visitante": "Sudáfrica", "marcador": "-:-", "dia": "18/06", "hora": "18:00", "finalizado": false, "estado": null },
+    { "idx": 6, "local": "Suiza", "visitante": "Bosnia y Herzegovina", "marcador": "-:-", "dia": "18/06", "hora": "21:00", "finalizado": false, "estado": null }
+  ],
+  "2026_68_quiniela": [
+    { "idx": 1, "local": "EE.UU.", "visitante": "Australia", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 2, "local": "Escocia", "visitante": "Marruecos", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 3, "local": "Brasil", "visitante": "Haití", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 4, "local": "Turquía", "visitante": "Paraguay", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 5, "local": "Países Bajos", "visitante": "Suecia", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 6, "local": "Alemania", "visitante": "Costa de Marfil", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 7, "local": "Ecuador", "visitante": "Curazao", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 8, "local": "Túnez", "visitante": "Japón", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 9, "local": "Bélgica", "visitante": "Irán", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 10, "local": "Uruguay", "visitante": "Cabo Verde", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 11, "local": "Nueva Zelanda", "visitante": "Egipto", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 12, "local": "Argentina", "visitante": "Austria", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 13, "local": "Francia", "visitante": "Irak", "marcador": "-:-", "dia": "17/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 14, "local": "Almería", "visitante": "Málaga", "marcador": "-:-", "dia": "21/06", "hora": "", "finalizado": false, "estado": null },
+    { "idx": 15, "local": "España", "visitante": "Arabia Saudí", "marcador": "-:-", "dia": "21/06", "hora": "", "finalizado": false, "estado": null, "pleno": true }
+  ]
+}
