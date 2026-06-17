@@ -651,8 +651,6 @@ createServer(async (req, res) => {
 
 async function iniciar() {
   if (usarWebhook) {
-    // Cerrar sesión previa (JustRunMy) y configurar webhook
-    try { await bot.telegram.callApi('close'); } catch(e) {}
     await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
     console.log('Webhook configurado en', RENDER_URL);
     // Re-set webhook cada 200ms para vencer al bot viejo en JustRunMy
