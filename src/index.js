@@ -39,7 +39,12 @@ async function sendDeliver(msg, chatId) {
   try {
     const existing = msgRefs[chatId];
     if (existing) {
-      try { await bot.telegram.editMessageText(chatId, existing, null, msg, { parse_mode: 'MarkdownV2' }); return; } catch { }
+      try { await bot.telegram.editMessageText(chatId, existing, null, msg, { parse_mode: 'MarkdownV2' }); return; } catch (e) {
+        const desc = e.description || '';
+        // Only send new message if the existing one was deleted
+        if (desc.includes('message to edit not found')) delete msgRefs[chatId];
+        else return; // unchanged, rate limit, etc. — keep current ref
+      }
     }
     const s = await bot.telegram.sendMessage(chatId, msg, { parse_mode: 'MarkdownV2' });
     msgRefs[chatId] = s.message_id;
@@ -276,24 +281,33 @@ let blinkTick = 0;
 function startBlink() {
   if (blinkTimer) return;
   blinkTick = 0;
-  blinkTimer = setInterval(async () => {
+  let rate = 2000;
+  const tick = async () => {
+    if (!blinkTimer) return;
     blinkState = !blinkState;
     blinkTick++;
-    // Every ~8s fetch fresh ESPN data to update scores/time
-    if (blinkTick % 8 === 0) await refreshLiveScores();
+    if (blinkTick % 5 === 0) await refreshLiveScores();
     const msg = buildBoletoBlink(blinkState);
-    if (!msg || !Object.keys(msgRefs).length) return;
+    if (!msg || !Object.keys(msgRefs).length) { stopBlink(); return; }
+    let allFail = true;
     for (const cid of Object.keys(msgRefs)) {
-      try { await bot.telegram.editMessageText(Number(cid), msgRefs[cid], null, msg, { parse_mode: 'MarkdownV2' }); } catch (e) {
-        if (e.description?.includes('message to edit not found') || e.code === 400) delete msgRefs[cid];
-        else console.error('blink err:', e.description || e.message);
+      try { await bot.telegram.editMessageText(Number(cid), msgRefs[cid], null, msg, { parse_mode: 'MarkdownV2' }); allFail = false; } catch (e) {
+        const desc = e.description || '';
+        if (desc.includes('message to edit not found')) delete msgRefs[cid];
+        else if (desc.includes('Too Many Requests')) allFail = true;
+        else { allFail = false; console.error('blink err:', desc); }
       }
     }
-  }, 1000);
+    // Increase interval if rate limited
+    if (allFail && rate < 10000) rate = Math.min(rate + 2000, 10000);
+    else if (!allFail && rate > 2000) rate = Math.max(rate - 500, 2000);
+    blinkTimer = setTimeout(tick, rate);
+  };
+  blinkTimer = setTimeout(tick, 100);
   console.log('BLINK ON');
 }
 function stopBlink() {
-  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; blinkTick = 0; console.log('BLINK OFF'); }
+  if (blinkTimer) { clearTimeout(blinkTimer); blinkTimer = null; blinkState = false; blinkTick = 0; console.log('BLINK OFF'); }
 }
 
 // ── MAIN ──
