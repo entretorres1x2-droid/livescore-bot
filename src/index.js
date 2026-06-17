@@ -243,9 +243,8 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   return l.join('\n');
 }
 function appendEvents(body) {
-  if (!liveEvents.length) return body;
-  const ev = liveEvents.slice(-8).map(e => e.line).join('\n');
-  return body + '\n\n═══ ⚽ EN VIVO ═══\n' + ev;
+  if (!lastEvent) return body;
+  return body + '\n' + lastEvent;
 }
 function buildBoletoBlink(blink = false) {
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
@@ -260,7 +259,7 @@ function buildBoletoFrom(data, blink = false) {
 
 // ── EVENTS ──
 const knownEvents = new Map();
-let liveEvents = []; // { line, tstamp }
+let lastEvent = null; // string — latest event shown under boleto
 async function sayAnimated(frames, delay = 1800) {
   if (!grupo) return;
   try {
@@ -269,28 +268,49 @@ async function sayAnimated(frames, delay = 1800) {
     await bot.telegram.editMessageText(grupo, s.message_id, null, frames[1]);
   } catch {}
 }
-const evMsg = {
-  'Goal': (d, pl, loc, vis, gL, gV) => [
-    `⚽⚽⚽⚽⚽ GOOOOOOL! ⚽⚽⚽⚽⚽\n${loc} ${gL}-${gV} ${vis}`,
-    `⚽ ${pl || loc} marca! ${loc} ${gL}-${gV} ${vis} (${d.clock.displayValue})`,
-  ],
-  'OwnGoal': (d, pl, loc, vis, gL, gV) => [
-    `😱😱😱 GOL EN CONTRA! 😱😱😱\n${loc} ${gL}-${gV} ${vis}`,
-    `😱 ${pl||vis} p.p. ${loc} ${gL}-${gV} ${vis} (${d.clock.displayValue})`,
-  ],
-  'YellowCard': (d, pl) => [
-    `🟡🟡 TARJETA AMARILLA 🟡🟡`,
-    `🟡 ${pl} (${d.clock.displayValue})`,
-  ],
-  'RedCard': (d, pl) => [
-    `🔴🔴🔴 TARJETA ROJA 🔴🔴🔴`,
-    `🔴 ${pl} expulsado! (${d.clock.displayValue})`,
-  ],
-  'YellowRedCard': (d, pl) => [
-    `🟡🔴 EXPULSADO 🟡🔴`,
-    `🟡🔴 ${pl} doble amarilla (${d.clock.displayValue})`,
-  ],
+const evIcons = {
+  'Goal':'⚽','OwnGoal':'😱','YellowCard':'🟡','RedCard':'🔴','YellowRedCard':'🟡🔴',
+  'Substitution':'🔄','ShotOnGoal':'💥','Miss':'❌','Save':'🧤','Penalty':'⚽',
+  'ShootoutGoal':'✅','ShootoutMiss':'❌',
 };
+function tickerLine(d, pl, loc, vis, sc) {
+  const min = d.clock.displayValue;
+  const suf = pl ? `${pl} (${min})` : `(${min})`;
+  const em = evIcons[d.type.text] || '•';
+  const showScore = d.type.text === 'Goal' || d.type.text === 'OwnGoal' || d.type.text === 'Penalty';
+  return showScore ? `${em} ${suf} · ${loc} ${sc} ${vis}` : `${em} ${suf}`;
+}
+function animateGoal(d, pl, loc, vis, sc) {
+  return [
+    `⚽⚽⚽⚽⚽ GOOOOOOL! ⚽⚽⚽⚽⚽`,
+    tickerLine(d, pl||loc, loc, vis, sc),
+  ];
+}
+function animateOwn(d, pl, loc, vis, sc) {
+  return [
+    `😱😱😱 GOL EN CONTRA! 😱😱😱`,
+    tickerLine(d, pl||vis, loc, vis, sc),
+  ];
+}
+function animateCard(title) {
+  return (d, pl) => [
+    `${title}`,
+    tickerLine(d, pl),
+  ];
+}
+const evMsg = {
+  'Goal': animateGoal,
+  'OwnGoal': animateOwn,
+  'Penalty': animateCard('⚽ PENALTI ⚽'),
+  'YellowCard': animateCard('🟡🟡 TARJETA AMARILLA 🟡🟡'),
+  'RedCard': animateCard('🔴🔴🔴 TARJETA ROJA 🔴🔴🔴'),
+  'YellowRedCard': animateCard('🟡🔴 EXPULSADO 🟡🔴'),
+};
+function getTicker(d, pl, loc, vis, sc) {
+  const fn = evMsg[d.type.text];
+  if (fn) return fn(d, pl, loc, vis, sc)[1]; // animated types use final frame
+  return tickerLine(d, pl||loc, loc, vis, sc); // non-animated: just ticker
+}
 function detailKey(d) { return `${d.type.text}|${d.clock.displayValue}|${d.team.id}`; }
 function playerName(d) {
   const a = d.athletesInvolved; if (!a || !a.length) return '';
@@ -321,22 +341,16 @@ async function refreshLiveScores() {
         const k = detailKey(d);
         if (seen.has(k)) continue;
         seen.add(k);
-        const fn = evMsg[d.type.text];
-        if (!fn) continue;
         const pl = playerName(d);
         const sc = getScoreStr(p);
-        const frames = fn(d, pl, p.loc, p.vis, sc);
-        if (!frames) continue;
-        // Animated notification (separate message)
-        await sayAnimated(frames, 2000);
-        // Also add to boleto live events list (persistent)
-        const min = d.clock.displayValue;
-        const line = `${frames[1]}`;
-        liveEvents.push({ line, tstamp: Date.now(), match: `${p.loc} vs ${p.vis}` });
-        if (liveEvents.length > 10) liveEvents.shift();
-        // Clean events older than 30min
-        const cut = Date.now() - 30 * 60 * 1000;
-        while (liveEvents.length && liveEvents[0].tstamp < cut) liveEvents.shift();
+        const isAnim = !!evMsg[d.type.text];
+        // Animated notification for goals/cards
+        if (isAnim) {
+          const frames = evMsg[d.type.text](d, pl, p.loc, p.vis, sc);
+          await sayAnimated(frames, 2000);
+        }
+        // Update ticker under boleto (ALL types)
+        lastEvent = getTicker(d, pl, p.loc, p.vis, sc);
       }
       if (m.est === 'post') {
         const gA = m.gL, gB = m.gV;
