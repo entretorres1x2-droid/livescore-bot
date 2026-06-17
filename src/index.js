@@ -621,27 +621,36 @@ async function startPolling() {
   setInterval(checkScores, config.POLL_INTERVAL * 1000);
 }
 
-// Servidor HTTP mínimo solo para health check
+// Servidor HTTP con webhook handler
 const PORT = process.env.PORT || 8080;
+const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
+
 createServer((req, res) => {
+  if (req.url === '/' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try { await bot.handleUpdate(JSON.parse(body)); } catch (e) {
+        console.error('Webhook error:', e.message);
+      }
+    });
+    res.end('OK');
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor en puerto ${PORT}`);
+  console.log(`Servidor en puerto ${PORT} (webhook)`);
 });
 
 async function iniciar() {
-  console.log('🤖 Arrancando bot (polling)...');
-  await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-  await bot.launch();
-  console.log('✅ Bot iniciado');
-  // Auto-ping cada 3 min para mantener vivo Render
+  await bot.telegram.setWebhook(RENDER_URL, { allowed_updates: ['message', 'callback_query', 'my_chat_member'] });
+  console.log('Webhook OK');
   setInterval(() => fetch(`http://localhost:${PORT}`).catch(() => {}), 180000);
   startPolling();
 }
 
-iniciar().catch(err => {
-  console.error('❌ Error al iniciar:', err.message, err.stack);
-  // Reintentar en 30s
-  setTimeout(() => iniciar().catch(() => {}), 30000);
+iniciar().catch(e => {
+  console.error('Error iniciar:', e.message);
+  startPolling();
 });
