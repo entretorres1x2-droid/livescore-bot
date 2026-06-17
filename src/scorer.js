@@ -133,6 +133,8 @@ async function detectarJornadaActual(tipo) {
     if (!tieneEquiposValidos(data.partidos)) return null;
     if (data.estado === 'ABIERTA') return true;
     if (data.escrutinio?.estadoJornada === 'Abierta') return true;
+    // Cerrada = apuestas cerradas, partidos aún por jugar
+    if (data.escrutinio?.estadoJornada === 'Cerrada' && !todosFinalizados(data.partidos)) return true;
     // Si hay campo estado pero no es activo -> no activa
     if (data.estado || data.escrutinio?.estadoJornada) return false;
     // Fallback solo si no hay estado en la respuesta
