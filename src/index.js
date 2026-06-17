@@ -653,7 +653,7 @@ async function iniciar() {
   if (usarWebhook) {
     await bot.telegram.setWebhook(RENDER_URL);
     console.log('Webhook configurado en', RENDER_URL);
-    // Re-set webhook cada 3s para vencer al bot viejo en JustRunMy
+    // Re-set webhook cada 1s para vencer al bot viejo en JustRunMy
     setInterval(async () => {
       try {
         const info = await bot.telegram.getWebhookInfo();
@@ -662,7 +662,11 @@ async function iniciar() {
           console.log('Webhook re-set (era:', info.url || '(vacío)', ')');
         }
       } catch (e) {}
-    }, 3000);
+    }, 1000);
+    // Auto-ping cada 3 min para evitar que Render duerma el servicio gratis
+    setInterval(() => {
+      fetch(`http://localhost:${PORT}`).catch(() => {});
+    }, 180000);
   } else {
     await bot.launch();
     console.log('🤖 Bot iniciado (polling)');
