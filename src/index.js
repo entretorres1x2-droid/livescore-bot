@@ -19,6 +19,7 @@ const CFG = join(__dirname, '..', 'datos', 'config.json');
 let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
 let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
+let msgRef = null; // { chatId, messageId } for editing boleto
 
 function load() {
   try { if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); admin = d.adminId; grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; } } catch {}
@@ -31,6 +32,16 @@ load();
 async function say(m) {
   if (grupo) try { await bot.telegram.sendMessage(grupo, m); } catch {}
   if (admin && admin !== grupo) try { await bot.telegram.sendMessage(admin, m); } catch {}
+}
+async function sendOrEdit(msg, ref) {
+  // If we have a previous message, edit it; otherwise send new
+  if (ref && ref.chatId && ref.messageId) {
+    try { await bot.telegram.editMessageText(ref.chatId, ref.messageId, null, msg, { parse_mode: 'MarkdownV2' }); return ref; } catch {}
+  }
+  if (grupo) {
+    try { const s = await bot.telegram.sendMessage(grupo, msg, { parse_mode: 'MarkdownV2' }); return { chatId: grupo, messageId: s.message_id }; } catch {}
+  }
+  return null;
 }
 
 // ── NORMALIZE ──
@@ -56,7 +67,7 @@ const d2e = {
   'grecia':'greece','irlanda':'ireland','irlanda del norte':'northern ireland','islandia':'iceland',
   'noruega':'norway','serbia':'serbia','austria':'austria','paraguay':'paraguay','ecuador':'ecuador',
   'curazao':'curacao','iran':'iran','uruguay':'uruguay','argentina':'argentina','irak':'iraq',
-  'almeria':'almeria','malaga':'malaga','austria':'austria','haiti':'haiti','finlandia':'finland',
+  'almeria':'almeria','malaga':'malaga','haiti':'haiti','finlandia':'finland',
 };
 const ov = { 'ath club':'athletic','at madrid':'atletico','r madrid':'madrid','psg':'paris',
   'porto':'porto','friburgo':'freiburg','freiburg':'freiburg','celta':'celta','leverkusen':'leverkusen' };
@@ -89,7 +100,7 @@ function ext(ev) {
   const h = c.competitors?.find(x=>x.homeAway==='home'), a = c.competitors?.find(x=>x.homeAway==='away');
   if (!h||!a) return null;
   return { id:ev.id, home:h.team, away:a.team, gL:parseInt(h.score)||0, gV:parseInt(a.score)||0,
-    min:ev.status?.displayClock||"0'", est:ev.status?.type?.state||'pre', det:ev.status?.type?.shortDetail||'' };
+    min:ev.status?.displayClock||"0'", est:ev.status?.type?.state||'pre' };
 }
 function match(loc, vis, eventos, dia) {
   if (!dia) return null;
@@ -119,66 +130,36 @@ async function losilla(tipo, j) {
 
 // ── JORNADA AUTO-DETECT ──
 function tieneEquipos(partidos) {
-  return partidos.some(p => {
-    const loc = typeof p.local==='object'?p.local.nombre:p.local;
-    return loc && !loc.includes('DETERMINAR');
-  });
+  return partidos.some(p => { const l = typeof p.local==='object'?p.local.nombre:p.local; return l&&!l.includes('DETERMINAR'); });
 }
 function todosFin(partidos) {
   return partidos.length>0 && partidos.every(p => {
-    const res = p.resultado||p.marcador||'';
-    return p.estado==='Finalizado'||p.estado==='Escrutado'||(res!==''&&res!=='-:-'&&res!=='-');
+    const r = p.resultado||p.marcador||''; return p.estado==='Finalizado'||p.estado==='Escrutado'||(r!==''&&r!=='-:-'&&r!=='-');
   });
-}
-function activa(data, tipo) {
-  if (!data?.partidos?.length) return null;
-  if (!tieneEquipos(data.partidos)) return null;
-  if (tipo==='q'&&data.estado==='ABIERTA') return true;
-  if (tipo==='qg') {
-    const e = data.escrutinio?.estadoJornada;
-    if (e==='Abierta') return true;
-    if (e==='Cerrada'&&!todosFin(data.partidos)) return true;
-    if (e==='Escrutada') return false;
-    if (!e&&!todosFin(data.partidos)) return true;
-    return false;
-  }
-  if (tipo==='q'&&data.estado==='ESCRUTADA') return false;
-  if (tipo==='q'&&!todosFin(data.partidos)) return true;
-  return false;
 }
 async function detectar(tipo, inicio) {
   for (let j=inicio; j<=inicio+50; j++) {
     const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMP}`
       :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${j}`);
-    if (!d?.partidos?.length) continue;
-    if (activa(d,tipo)) return j;
-    if (tipo==='q'&&d.estado==='ABIERTA') return j; // any ABIERTA = active
-    if (tipo==='qg'&&d.escrutinio?.estadoJornada==='Abierta') return j;
-    if (tipo==='qg'&&d.escrutinio?.estadoJornada==='Cerrada'&&!todosFin(d.partidos)) return j;
+    if (!d?.partidos?.length||!tieneEquipos(d.partidos)) continue;
+    if (tipo==='q') { if (d.estado==='ABIERTA') return j; if (d.estado!=='ESCRUTADA') return j; }
+    else { const e = d.escrutinio?.estadoJornada; if (e==='Abierta') return j; if (e==='Cerrada'&&!todosFin(d.partidos)) return j; if (e==='Escrutada') continue; return j; }
   }
   for (let j=inicio-1; j>=Math.max(1,inicio-20); j--) {
     const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMP}`
       :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${j}`);
-    if (!d?.partidos?.length) continue;
-    if (activa(d,tipo)) return j;
+    if (!d?.partidos?.length||!tieneEquipos(d.partidos)) continue;
+    if (tipo==='q') { if (d.estado!=='ESCRUTADA') return j; }
+    else { const e = d.escrutinio?.estadoJornada; if (e!=='Escrutada') return j; }
   }
   return inicio;
 }
 async function verificarAvance() {
-  const [dq, dqg] = await Promise.all([
-    jget(`https://api.eduardolosilla.es/escrutinios?num_jornada=${JQ}&num_temporada=${TEMP}`),
-    jget(`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${JQG}`),
-  ]);
-  let cambio = false;
-  if (dq?.partidos?.length && dq.estado==='ESCRUTADA' && todosFin(dq.partidos)) {
-    const prox = await detectar('q', JQ+1);
-    if (prox!==JQ) { JQ=prox; cambio=true; console.log('Quiniela avanzada a J'+JQ); }
-  }
-  if (dqg?.partidos?.length && (dqg.escrutinio?.estadoJornada==='Escrutada' || dqg.escrutinio?.estadoJornada==='Cerrada' && todosFin(dqg.partidos))) {
-    const prox = await detectar('qg', JQG+1);
-    if (prox!==JQG) { JQG=prox; cambio=true; console.log('Quinigol avanzada a J'+JQG); }
-  }
-  if (cambio) save();
+  const [dq,dqg]=await Promise.all([jget(`https://api.eduardolosilla.es/escrutinios?num_jornada=${JQ}&num_temporada=${TEMP}`),jget(`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${JQG}`)]);
+  let c=false;
+  if (dq?.partidos?.length && dq.estado==='ESCRUTADA' && todosFin(dq.partidos)) { const p=await detectar('q',JQ+1); if (p!==JQ) { JQ=p; c=true; console.log('Q→J'+JQ); } }
+  if (dqg?.partidos?.length && (dqg.escrutinio?.estadoJornada==='Escrutada'||(dqg.escrutinio?.estadoJornada==='Cerrada'&&todosFin(dqg.partidos)))) { const p=await detectar('qg',JQG+1); if (p!==JQG) { JQG=p; c=true; console.log('QG→J'+JQG); msgRef=null; } }
+  if (c) save();
 }
 
 // ── MAP ──
@@ -197,26 +178,49 @@ function map(p,i,tipo) {
 
 // ── BOLETO ──
 function pad(s, n) { s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); }
-function boleto(todos, tipo, j, tit) {
+function fmtBoleto(todos, tipo, j, tit) {
   const f = todos.filter(p=>p.tipo===tipo);
   if (!f.length) return '';
-  // Hide matches with "A DETERMINAR"
-  const visibles = f.filter(p=>!p.loc.toUpperCase().includes('DETERMINAR'));
-  if (!visibles.length) return '';
-  const maxW = Math.max(...visibles.map(p=>Math.max(n(p.loc).length,n(p.vis).length)),8);
-  let l = [`${tit} J${j}`];
-  for (const p of visibles) {
+  const v = f.filter(p=>!p.loc.toUpperCase().includes('DETERMINAR'));
+  if (!v.length) return '';
+  const w = Math.max(...v.map(p=>Math.max(p.loc.length,p.vis.length)),8);
+  const viv = v.filter(p=>p.estado==='in').length;
+  const fin = v.filter(p=>p.estado==='post').length;
+  const pre = v.length-viv-fin;
+  
+  let l = [];
+  // Header
+  let h = `${tit} J${j}`;
+  if (viv>0) h += `  🟢 ${viv} en vivo`;
+  if (fin===v.length) h += `  🏁 FINALIZADA`;
+  l.push(h);
+  l.push('```');
+  // Table header
+  l.push(`┌────┬${'─'.repeat(w+2)}┬───────┬${'─'.repeat(w+2)}┬──────┐`);
+  l.push(`│ #  │ Local${' '.repeat(w-5)} │ Goles │ Visit${' '.repeat(w-5)}  │ Min  │`);
+  l.push(`├────┼${'─'.repeat(w+2)}┼───────┼${'─'.repeat(w+2)}┼──────┤`);
+  for (const p of v) {
     const ft = p.estado==='post'||p.fin;
     const enVivo = p.estado==='in';
-    let gL='-', gV='-', min='', em='';
-    if (ft) { gL=p.gL!==null?esc(p.gL):'-'; gV=p.gV!==null?esc(p.gV):'-'; min='FT'; em='🏁'; }
-    else if (enVivo) { gL=p.gL!==null?esc(p.gL):'0'; gV=p.gV!==null?esc(p.gV):'0'; min=p.min; em='🟢'; }
+    let gL='-', gV='-', min='', em='', numEm='';
+    if (ft) { gL=p.gL!==null?esc(p.gL):'-'; gV=p.gV!==null?esc(p.gV):'-'; min='FT'; }
+    else if (enVivo) { gL=p.gL!==null?esc(p.gL):'0'; gV=p.gV!==null?esc(p.gV):'0'; min=p.min; numEm='🟢'; }
     else { min=(p.dia||'')+(p.hora?' '+p.hora:''); }
-    const loc = pad(p.loc, maxW);
-    const vis = pad(p.vis, maxW);
-    const sc = `${gL}-${gV}`;
-    l.push(`${em} ${String(p.num).padStart(2)} ${loc} ${sc} ${vis}  ${min}`);
+    const n2 = (numEm+String(p.num)).padEnd(4);
+    const loc = pad(p.loc, w);
+    const vis = pad(p.vis, w);
+    const sc = `${gL}-${gV}`.padStart(5);
+    const mi = (ft?'🏁 ':'')+min;
+    l.push(`│ ${n2}│ ${loc} │ ${sc} │ ${vis} │ ${mi.padEnd(4)}│`);
   }
+  l.push(`└────┴${'─'.repeat(w+2)}┴───────┴${'─'.repeat(w+2)}┴──────┘`);
+  // Footer
+  let footer = `${v.length} partidos`;
+  if (viv>0) footer += `  🟢 ${viv} en juego`;
+  if (fin>0) footer += `  🏁 ${fin} finalizados`;
+  if (pre>0) footer += `  ⏳ ${pre} pendientes`;
+  l.push(footer);
+  l.push('```');
   return l.join('\n');
 }
 
@@ -256,29 +260,35 @@ async function check() {
       });
     }
 
-    // Detect changes
+    // Event notifications
+    let huboEvento = false;
     for (const p of todos) {
       if (p.estado==='pre') continue;
       const old = prev.find(e=>e.id===p.id);
       if (!old) continue;
-      if (old.estado==='pre'&&p.estado==='in') await say(`🟢 COMENZÓ [${p.tipo}] ${p.loc} vs ${p.vis}`);
+      if (old.estado==='pre'&&p.estado==='in') { huboEvento=true; await say(`🟢 COMENZÓ [${p.tipo}] ${p.loc} vs ${p.vis}`); }
       if (p.estado==='in'&&old.estado!=='post') {
         const gA=p.gL||0, gB=p.gV||0, pA=old.gL||0, pB=old.gV||0;
-        if (gA>pA) await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`);
-        if (gB>pB) await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`);
+        if (gA>pA) { huboEvento=true; await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
+        if (gB>pB) { huboEvento=true; await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
       }
-      if (p.estado==='post'&&old.estado!=='post') await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`);
+      if (p.estado==='post'&&old.estado!=='post') { huboEvento=true; await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`); }
     }
 
-    const cambios = todos.some(p=>{const old=prev.find(e=>e.id===p.id); return old&&(old.estado!==p.estado||old.gL!==p.gL||old.gV!==p.gV);});
-    if (cambios&&todos.length) {
-      const msg = [boleto(todos,'Quiniela',JQ,'⚽ QUINIELA'),boleto(todos,'Quinigol',JQG,'⚽ QUINIGOL')].filter(Boolean).join('\n\n');
-      await say(msg);
+    // Send / update boleto — use edit to simulate "blinking"
+    const bQ = fmtBoleto(todos,'Quiniela',JQ,'⚽ QUINIELA');
+    const bQG = fmtBoleto(todos,'Quinigol',JQG,'⚽ QUINIGOL');
+    const msg = [bQ,bQG].filter(Boolean).join('\n\n');
+    
+    if (todos.length && msg) {
+      if (!prev.length || huboEvento) {
+        const s = await sendOrEdit(msg, null);
+        if (s) msgRef = s;
+      } else {
+        await sendOrEdit(msg, msgRef);
+      }
     }
-    if (!prev.length&&todos.length) {
-      const msg = [boleto(todos,'Quiniela',JQ,'⚽ QUINIELA'),boleto(todos,'Quinigol',JQG,'⚽ QUINIGOL')].filter(Boolean).join('\n\n');
-      await say(msg);
-    }
+
     prev = todos;
   } catch (e) { console.error('check:', e.message); }
 }
@@ -295,12 +305,14 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  const msg = [boleto(prev,'Quiniela',JQ,'⚽ QUINIELA'),boleto(prev,'Quinigol',JQG,'⚽ QUINIGOL')].filter(Boolean).join('\n\n');
-  ctx.reply(msg || 'Cargando...', K);
+  const bQ = fmtBoleto(prev,'Quiniela',JQ,'⚽ QUINIELA');
+  const bQG = fmtBoleto(prev,'Quinigol',JQG,'⚽ QUINIGOL');
+  ctx.reply([bQ,bQG].filter(Boolean).join('\n\n'), { parse_mode: 'MarkdownV2' });
 });
 bot.command('partidos', async (ctx) => {
-  const msg = [boleto(prev,'Quiniela',JQ,'⚽ QUINIELA'),boleto(prev,'Quinigol',JQG,'⚽ QUINIGOL')].filter(Boolean).join('\n\n');
-  ctx.reply(msg || 'Cargando...', K);
+  const bQ = fmtBoleto(prev,'Quiniela',JQ,'⚽ QUINIELA');
+  const bQG = fmtBoleto(prev,'Quinigol',JQG,'⚽ QUINIGOL');
+  ctx.reply([bQ,bQG].filter(Boolean).join('\n\n'), { parse_mode: 'MarkdownV2' });
 });
 
 // ── SERVER ──
