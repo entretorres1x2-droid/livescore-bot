@@ -181,13 +181,16 @@ async function checkScores() {
     const todos = [];
     for (const p of jornadaQ) {
       const m = buscarMatch(p.local, p.visitante, eventos, p.dia);
+      const estado = m ? m.estado : (p.finalizado ? 'post' : 'pre');
+      const gL = m ? m.gLocal : (p.finalizado ? p.golesLocal : null);
+      const gV = m ? m.gVisit : (p.finalizado ? p.golesVisitante : null);
       todos.push({
         id: m ? m.id : `q-${p.idx}`,
         local: p.local, visitante: p.visitante,
-        golesLocal: m ? m.gLocal : (p.finalizado ? p.golesLocal : null),
-        golesVisitante: m ? m.gVisit : (p.finalizado ? p.golesVisitante : null),
+        golesLocal: estado === 'pre' ? null : gL,
+        golesVisitante: estado === 'pre' ? null : gV,
         minuto: m ? m.minuto : (p.dia + ' ' + (p.hora||'')),
-        estado: m ? m.estado : (p.finalizado ? 'post' : 'pre'),
+        estado,
         detalle: m ? m.detail : (p.finalizado ? 'FT' : 'Programado'),
         finalizado: p.finalizado || false,
         tipo: 'Quiniela',
@@ -195,13 +198,16 @@ async function checkScores() {
     }
     for (const p of jornadaQG) {
       const m = buscarMatch(p.local, p.visitante, eventos, p.dia);
+      const estado = m ? m.estado : (p.finalizado ? 'post' : 'pre');
+      const gL = m ? m.gLocal : (p.finalizado ? p.golesLocal : null);
+      const gV = m ? m.gVisit : (p.finalizado ? p.golesVisitante : null);
       todos.push({
         id: m ? m.id : `qg-${p.idx}`,
         local: p.local, visitante: p.visitante,
-        golesLocal: m ? m.gLocal : (p.finalizado ? p.golesLocal : null),
-        golesVisitante: m ? m.gVisit : (p.finalizado ? p.golesVisitante : null),
+        golesLocal: estado === 'pre' ? null : gL,
+        golesVisitante: estado === 'pre' ? null : gV,
         minuto: m ? m.minuto : (p.dia + ' ' + (p.hora||'')),
-        estado: m ? m.estado : (p.finalizado ? 'post' : 'pre'),
+        estado,
         detalle: m ? m.detail : (p.finalizado ? 'FT' : 'Programado'),
         finalizado: p.finalizado || false,
         tipo: 'Quinigol',
