@@ -213,20 +213,22 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
     if (ft) {
       gL = p.gL !== null ? String(p.gL) : '-';
       gV = p.gV !== null ? String(p.gV) : '-';
-      mi = 'FT'.padStart(5);
+      mi = 'FT'.padStart(6);
     } else if (enVivo) {
       gL = p.gL !== null ? String(p.gL) : '0';
       gV = p.gV !== null ? String(p.gV) : '0';
-      mi = (p.min || '').padStart(5);
+      const raw = p.min || '';
+      mi = raw.includes('+') ? `➕${raw}` : raw;
+      mi = mi.padStart(6);
     } else {
       const dd = (p.dia || '').slice(0, 3).toUpperCase();
       const hh = p.hora ? p.hora.slice(0, 2) : '';
-      mi = (dd + hh).padStart(5);
+      mi = (dd + hh).padStart(6);
     }
     const nStr = String(p.num).padStart(2);
     const rt = enVivo ? `🟢${nStr}` : `  ${nStr}`;
     if (enVivo && blink) {
-      l.push(`${rt} ${' '.repeat(W)} ${' '.repeat(5)} ${' '.repeat(W)} ${' '.repeat(5)}`);
+      l.push(`${rt} ${' '.repeat(W)} ${' '.repeat(5)} ${' '.repeat(W)} ${' '.repeat(6)}`);
     } else {
       const loc = pad(abv(p.loc, W), W);
       const vis = pad(abv(p.vis, W), W);
@@ -374,7 +376,7 @@ let blinkTick = 0;
 function startBlink() {
   if (blinkTimer) return;
   blinkTick = 0;
-  let rate = 2000;
+  let rate = 1000;
   const tick = async () => {
     if (!blinkTimer) return;
     blinkState = !blinkState;
@@ -393,7 +395,7 @@ function startBlink() {
     }
     // Increase interval if rate limited
     if (allFail && rate < 10000) rate = Math.min(rate + 2000, 10000);
-    else if (!allFail && rate > 2000) rate = Math.max(rate - 500, 2000);
+    else if (!allFail && rate > 1000) rate = Math.max(rate - 500, 1000);
     blinkTimer = setTimeout(tick, rate);
   };
   blinkTimer = setTimeout(tick, 100);
