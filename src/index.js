@@ -175,48 +175,46 @@ function map(p,i,tipo) {
 }
 
 // ── BOLETO ──
+function abv(s, n) {
+  if (s.length <= n) return s;
+  const p = s.split(' ');
+  if (p.length > 1 && p[0].length <= n) return p[0];
+  return s.substring(0, n-1) + '.';
+}
 function pad(s, n) { s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); }
 function fmtBoleto(todos, tipo, j, tit) {
   const f = todos.filter(p=>p.tipo===tipo);
   if (!f.length) return '';
   const v = f.filter(p=>!p.loc.toUpperCase().includes('DETERMINAR'));
   if (!v.length) return '';
-  const w = Math.max(...v.map(p=>Math.max(p.loc.length,p.vis.length)),8);
+  const W = 12;
   const viv = v.filter(p=>p.estado==='in').length;
   const fin = v.filter(p=>p.estado==='post').length;
   const pre = v.length-viv-fin;
-  
   let l = [];
-  // Header
   let h = `${tit} J${j}`;
-  if (viv>0) h += `  🟢 ${viv} en vivo`;
-  if (fin===v.length) h += `  🏁 FINALIZADA`;
+  if (viv > 0) h += `  🟢 ${viv} en vivo`;
+  if (fin === v.length) h += `  🏁 FINALIZADA`;
   l.push(h);
   l.push('```');
-  // Table header
-  l.push(`┌────┬${'─'.repeat(w+2)}┬───────┬${'─'.repeat(w+2)}┬──────┐`);
-  l.push(`│ #  │ Local${' '.repeat(w-5)} │ Goles │ Visit${' '.repeat(w-5)}  │ Min  │`);
-  l.push(`├────┼${'─'.repeat(w+2)}┼───────┼${'─'.repeat(w+2)}┼──────┤`);
   for (const p of v) {
     const ft = p.estado==='post'||p.fin;
     const enVivo = p.estado==='in';
-    let gL='-', gV='-', min='', em='', numEm='';
+    let gL='-', gV='-', min='', preok='';
     if (ft) { gL=p.gL!==null?String(p.gL):'-'; gV=p.gV!==null?String(p.gV):'-'; min='FT'; }
-    else if (enVivo) { gL=p.gL!==null?String(p.gL):'0'; gV=p.gV!==null?String(p.gV):'0'; min=p.min; numEm='🟢'; }
-    else { min=(p.dia||'')+(p.hora?' '+p.hora:''); }
-    const n2 = (numEm+String(p.num)).padEnd(4);
-    const loc = pad(p.loc, w);
-    const vis = pad(p.vis, w);
-    const sc = `${gL}-${gV}`.padStart(5);
-    const mi = (ft?'🏁 ':'')+min;
-    l.push(`│ ${n2}│ ${loc} │ ${sc} │ ${vis} │ ${mi.padEnd(4)}│`);
+    else if (enVivo) { gL=p.gL!==null?String(p.gL):'0'; gV=p.gV!==null?String(p.gV):'0'; min=p.min; }
+    else { min=(p.dia||'').slice(0,3)+(p.hora?' '+p.hora:''); }
+    const loc = pad(abv(p.loc,W), W);
+    const vis = pad(abv(p.vis,W), W);
+    const sc = ft||enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
+    const rt = enVivo ? `🟢 ${p.num}` : `  ${p.num}`;
+    const mi = ft ? `${min} 🏁` : min;
+    l.push(`${rt}  ${loc} ${sc}  ${vis} ${mi}`);
   }
-  l.push(`└────┴${'─'.repeat(w+2)}┴───────┴${'─'.repeat(w+2)}┴──────┘`);
-  // Footer
   let footer = `${v.length} partidos`;
-  if (viv>0) footer += `  🟢 ${viv} en juego`;
-  if (fin>0) footer += `  🏁 ${fin} finalizados`;
-  if (pre>0) footer += `  ⏳ ${pre} pendientes`;
+  if (viv > 0) footer += `  🟢 ${viv}`;
+  if (fin > 0) footer += `  🏁 ${fin}`;
+  if (pre > 0) footer += `  ⏳ ${pre}`;
   l.push(footer);
   l.push('```');
   return l.join('\n');
