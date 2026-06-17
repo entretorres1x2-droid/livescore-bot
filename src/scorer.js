@@ -78,7 +78,12 @@ function matchEquipos(nombreLosilla, nombreESPN) {
   const target = prepararEquipo(nombreLosilla);
   const full = normalize(nombreESPN);
   const short = normalize(nombreESPN.replace(/[^a-z0-9]/g, ''));
-  return full.includes(target) || short.includes(target) || (target.length >= 4 && full.includes(target.slice(0, 4)));
+  if (full.includes(target) || short.includes(target)) return true;
+  if (target.length >= 4 && full.includes(target.slice(0, 4))) return true;
+  // Fallback: cada palabra del target contra el full
+  const palabras = target.split(' ').filter(w => w.length > 2);
+  const matches = palabras.filter(w => full.includes(w));
+  return matches.length >= Math.min(2, Math.ceil(palabras.length / 2));
 }
 
 async function fetchJSON(url) {
