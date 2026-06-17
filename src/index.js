@@ -220,7 +220,7 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
     const vis = pad(abv(p.vis, W), W);
     const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
     const nStr = String(p.num).padStart(2);
-    const liveEm = blink ? '🟡' : '🟢';
+    const liveEm = blink ? '🔴' : '🟢';
     const rt = enVivo ? `${liveEm}${nStr}` : `  ${nStr}`;
     l.push(`${rt}  ${loc} ${sc}  ${vis} ${mi}`);
   }
