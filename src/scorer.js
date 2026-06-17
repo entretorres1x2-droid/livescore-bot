@@ -42,6 +42,10 @@ function normalize(s) {
     .trim();
 }
 
+function cleanMatch(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function fixName(txt) {
   const list = ['real', 'fc', 'sd', 'ud', 'cd', 'cf', 'rc', 'sad', 'de', 'club', 'at', 'ath', 'vigo', 'r', 'b'];
   const words = txt.split(' ');
@@ -66,23 +70,127 @@ const teamMappings = {
   'genk': 'genk',
 };
 
+const spanishToEnglish = {
+  'eeuu': 'united states',
+  'usa': 'united states',
+  'alemania': 'germany',
+  'argelia': 'algeria',
+  'arabia saudi': 'saudi arabia',
+  'belgica': 'belgium',
+  'brasil': 'brazil',
+  'camerun': 'cameroon',
+  'costa marfil': 'ivory coast',
+  'croacia': 'croatia',
+  'dinamarca': 'denmark',
+  'escocia': 'scotland',
+  'eslovaquia': 'slovakia',
+  'eslovenia': 'slovenia',
+  'espana': 'spain',
+  'filipinas': 'philippines',
+  'francia': 'france',
+  'gales': 'wales',
+  'grecia': 'greece',
+  'inglaterra': 'england',
+  'irlanda del norte': 'northern ireland',
+  'irlanda': 'ireland',
+  'islas feroe': 'faroe islands',
+  'italia': 'italy',
+  'japon': 'japan',
+  'letonia': 'latvia',
+  'lituania': 'lithuania',
+  'marruecos': 'morocco',
+  'nueva zelanda': 'new zealand',
+  'paises bajos': 'netherlands',
+  'polonia': 'poland',
+  'rumania': 'romania',
+  'suecia': 'sweden',
+  'suiza': 'switzerland',
+  'tunez': 'tunisia',
+  'turquia': 'turkey',
+  'ucrania': 'ukraine',
+  'sudafrica': 'south africa',
+  'corea del sur': 'south korea',
+  'corea del norte': 'north korea',
+  'republica checa': 'czech republic',
+  'hungria': 'hungary',
+  'finlandia': 'finland',
+  'islandia': 'iceland',
+  'egipto': 'egypt',
+  'cabo verde': 'cape verde',
+  'curazao': 'curacao',
+  'singapur': 'singapore',
+  'tailandia': 'thailand',
+  'bielorrusia': 'belarus',
+  'siria': 'syria',
+  'jordania': 'jordan',
+  'chipre': 'cyprus',
+  'palestina': 'palestine',
+  'kenia': 'kenya',
+  'armenia': 'armenia',
+  'kazajistan': 'kazakhstan',
+  'comoras': 'comoros',
+  'ruanda': 'rwanda',
+  'gibraltar': 'gibraltar',
+  'islas caiman': 'cayman islands',
+  'bosnia herzegovina': 'bosnia',
+  'honduras': 'honduras',
+  'turkiye': 'turkey',
+  'deportivo': 'deportivo',
+  'las palmas': 'las palmas',
+  'malaga': 'malaga',
+  'castellon': 'castellon',
+  'almeria': 'almeria',
+  'portugal': 'portugal',
+  'rd congo': 'congo dr',
+  'congo dr': 'congo dr',
+  'rdc': 'congo dr',
+  'rep checa': 'czech republic',
+  'rep checo': 'czech republic',
+  'checa': 'czech republic',
+  'uzbekistan': 'uzbekistan',
+  'panama': 'panama',
+  'ghana': 'ghana',
+  'bosnia': 'bosnia',
+  'bosnia herzegovina': 'bosnia',
+  'suiza': 'switzerland',
+};
+
 function prepararEquipo(name) {
   const n = normalize(name);
+  // (1) Manual overrides (AppScript: check lLow directly)
   for (const [k, v] of Object.entries(teamMappings)) {
     if (n.includes(k)) return v;
   }
-  return fixName(n);
+  // (2) Spanish→English translation (AppScript: translateTeam)
+  const translated = spanishToEnglish[n] || n;
+  // (3) Remove noise words (AppScript: fix)
+  return fixName(translated);
 }
 
 function matchEquipos(nombreLosilla, nombreESPN) {
   const target = prepararEquipo(nombreLosilla);
   const full = normalize(nombreESPN);
+  // AppScript: check displayName + shortDisplayName + abbreviation
   const short = normalize(nombreESPN.replace(/[^a-z0-9]/g, ''));
   if (full.includes(target) || short.includes(target)) return true;
   if (target.length >= 4 && full.includes(target.slice(0, 4))) return true;
-  // Fallback: cada palabra del target contra el full
+  // Fallback: palabra suelta (AppScript: contains + word-level)
   const palabras = target.split(' ').filter(w => w.length > 2);
   const matches = palabras.filter(w => full.includes(w));
+  return matches.length >= Math.min(2, Math.ceil(palabras.length / 2));
+}
+
+/** AppScript-style checkTeam: checks if target is in fullName, shortName, or abbreviation */
+function equipoContiene(teamObj, target) {
+  const check = (s) => cleanMatch(s);
+  if (check(teamObj.displayName).includes(target) ||
+      check(teamObj.shortDisplayName || '').includes(target) ||
+      check(teamObj.abbreviation || '').includes(target)) return true;
+  if (target.length >= 4 && check(teamObj.displayName).includes(target.slice(0, 4))) return true;
+  // palabra suelta fallback (AppScript: similar a matchEquipos)
+  const palabras = target.split(' ').filter(w => w.length > 2);
+  const fullClean = check(teamObj.displayName);
+  const matches = palabras.filter(w => fullClean.includes(w));
   return matches.length >= Math.min(2, Math.ceil(palabras.length / 2));
 }
 
@@ -348,15 +456,20 @@ function extraerDatosPartido(event) {
 
 function buscarMatch(local, visitante, eventos, diaSemana) {
   if (!diaSemana) return null;
-  // Si diaSemana contiene "/" es fecha (DD/MM), ignorar filtro de día
   const esFecha = diaSemana.includes('/');
   let targetDia = null;
   if (!esFecha) targetDia = normalize(diaSemana).toUpperCase().slice(0, 3);
+
+  // Preparar nombres Losilla (AppScript pipeline: clean → translateTeam → fix → overrides)
+  const pLoc = prepararEquipo(local);
+  const pVis = prepararEquipo(visitante);
+  if (pLoc.length < 2 || pVis.length < 2) return null;
 
   for (const ev of eventos) {
     const comp = ev.competitions?.[0];
     if (!comp) continue;
 
+    // Filtro día (AppScript: day-of-week strict)
     if (!esFecha) {
       const dayEng = new Date(ev.date).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Europe/Madrid' });
       const mapDia = { Sun: 'DOM', Mon: 'LUN', Tue: 'MAR', Wed: 'MIE', Thu: 'JUE', Fri: 'VIE', Sat: 'SAB' };
@@ -368,13 +481,11 @@ function buscarMatch(local, visitante, eventos, diaSemana) {
     const away = comp.competitors?.find(c => c.homeAway === 'away');
     if (!home || !away) continue;
 
-    const homeName = normalize(home.team.displayName);
-    const awayName = normalize(away.team.displayName);
-
-    if (matchEquipos(local, homeName) && matchEquipos(visitante, awayName)) {
+    // AppScript: check displayName, shortDisplayName, abbreviation
+    if (equipoContiene(home.team, pLoc) && equipoContiene(away.team, pVis)) {
       return extraerDatosPartido(ev);
     }
-    if (matchEquipos(local, awayName) && matchEquipos(visitante, homeName)) {
+    if (equipoContiene(home.team, pVis) && equipoContiene(away.team, pLoc)) {
       return extraerDatosPartido(ev);
     }
   }
