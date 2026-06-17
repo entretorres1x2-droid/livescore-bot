@@ -16,6 +16,7 @@ const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
 if (!TELEGRAM_BOT_TOKEN) { console.error('TELEGRAM_BOT_TOKEN no definido'); process.exit(1); }
 
 const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+const sinTeclado = { reply_markup: { remove_keyboard: true } };
 let adminId = null;
 let targetGroupId = null;
 const DATA_FILE = join(__dirname, '..', 'datos', 'config.json');
@@ -40,8 +41,9 @@ function saveData() {
 loadData();
 
 async function enviar(msg) {
-  if (targetGroupId) try { await bot.telegram.sendMessage(targetGroupId, msg); } catch {}
-  if (adminId && adminId !== targetGroupId) try { await bot.telegram.sendMessage(adminId, msg); } catch {}
+  const opts = sinTeclado;
+  if (targetGroupId) try { await bot.telegram.sendMessage(targetGroupId, msg, opts); } catch {}
+  if (adminId && adminId !== targetGroupId) try { await bot.telegram.sendMessage(adminId, msg, opts); } catch {}
 }
 
 // ---- HELPERS ----
@@ -202,7 +204,7 @@ async function checkScores() {
         estado: m ? m.estado : (p.finalizado ? 'post' : 'pre'),
         detalle: m ? m.detail : (p.finalizado ? 'FT' : 'Programado'),
         finalizado: p.finalizado || false,
-        tipo: 'Quiniela',
+        tipo: 'Quinigol',
       });
     }
 
