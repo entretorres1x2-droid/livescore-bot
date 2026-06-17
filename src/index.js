@@ -253,6 +253,35 @@ function buildBoletoFrom(data, blink = false) {
   return [bQ, bQG].filter(Boolean).join('\n\n');
 }
 
+// ── EVENTS ──
+const knownEvents = new Map(); // { matchId: Set(detailKey) }
+const evMsg = {
+  'Goal': (d, pl) => `⚽ GOOOL de ${pl}!`,
+  'OwnGoal': (d, pl) => `😱 GOL EN CONTRA de ${pl}!`,
+  'Penalty': (d, pl) => `⚽ PENALTI de ${pl}!`,
+  'YellowCard': (d, pl) => `🟡 TARJETA AMARILLA ${pl}`,
+  'RedCard': (d, pl) => `🔴 TARJETA ROJA ${pl}`,
+  'YellowRedCard': (d, pl) => `🟡🔴 DOBLE AMARILLA ${pl}`,
+  'Substitution': (d, pl) => `🔄 Cambio: ${pl}`,
+  'ShootoutGoal': (d, pl) => `✅ ${pl} anota en penaltis`,
+  'ShootoutMiss': (d, pl) => `❌ ${pl} falla penalti`,
+  'ShotOnGoal': (d, pl) => `💥 ${pl} remata a puerta!`,
+  'Miss': (d, pl) => `❌ ${pl} remata fuera`,
+  'Save': (d, pl) => `🧤 ${pl} para!`,
+};
+function detailKey(d) { return `${d.type.text}|${d.clock.displayValue}|${d.team.id}`; }
+function playerName(d) {
+  const a = d.athletesInvolved; if (!a || !a.length) return '';
+  const subs = a.filter(x => x.displayName);
+  return subs.length ? subs.map(x => x.displayName).join(', ') : '';
+}
+function formatEvent(d, loc, vis) {
+  const pl = playerName(d);
+  const fn = evMsg[d.type.text];
+  if (!fn) return null;
+  return fn(d, pl);
+}
+
 // ── LIVE REFRESH ──
 async function refreshLiveScores() {
   if (!prev.some(p => p.estado === 'in')) return;
@@ -262,15 +291,27 @@ async function refreshLiveScores() {
       if (p.estado !== 'in') continue;
       const m = match(p.loc, p.vis, ev, p.dia);
       if (!m) continue;
+      // Fetch event detail for plays/cards/etc.
+      const det = await jget(`https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard/${m.id}`);
+      const details = det?.competitions?.[0]?.details || [];
+      if (!knownEvents.has(p.id)) knownEvents.set(p.id, new Set());
+      const seen = knownEvents.get(p.id);
+      for (const d of details) {
+        const k = detailKey(d);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const msg = formatEvent(d, p.loc, p.vis);
+        if (msg) await say(`[${p.tipo}] ${p.loc} vs ${p.vis}: ${msg} (${d.clock.displayValue})`);
+      }
       if (m.est === 'post') {
         const gA = m.gL, gB = m.gV;
         p.estado = 'post'; p.fin = true; p.gL = gA; p.gV = gB; p.min = 'FT';
         await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${gA}-${gB} ${p.vis}`);
       } else if (m.est === 'in') {
         const gA = m.gL, gB = m.gV, pA = p.gL || 0, pB = p.gV || 0;
-        if (gA > pA) await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${m.min})`);
-        if (gB > pB) await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${m.min})`);
-        p.gL = gA; p.gV = gB; p.min = m.min;
+        if (gA > pA) p.gL = gA;
+        if (gB > pB) p.gV = gB;
+        p.min = m.min;
       }
     }
   } catch (e) { console.error('refreshLiveScores:', e.message); }
