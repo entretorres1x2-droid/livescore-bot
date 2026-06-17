@@ -19,7 +19,7 @@ const CFG = join(__dirname, '..', 'datos', 'config.json');
 let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
 let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
-let msgRef = null;
+let msgRefs = {}; // { [chatId]: messageId }
 let blinkState = false;
 let blinkTimer = null;
 
@@ -35,15 +35,17 @@ async function say(m) {
   if (grupo) try { await bot.telegram.sendMessage(grupo, m); } catch {}
   if (admin && admin !== grupo) try { await bot.telegram.sendMessage(admin, m); } catch {}
 }
-async function sendOrEdit(msg, ref) {
-  if (ref && ref.chatId && ref.messageId) {
-    try { await bot.telegram.editMessageText(ref.chatId, ref.messageId, null, msg, { parse_mode: 'MarkdownV2' }); return ref; } catch { }
-  }
-  if (grupo) {
-    try { const s = await bot.telegram.sendMessage(grupo, msg, { parse_mode: 'MarkdownV2' }); return { chatId: grupo, messageId: s.message_id }; } catch { }
-  }
-  return null;
+async function sendDeliver(msg, chatId) {
+  try {
+    const existing = msgRefs[chatId];
+    if (existing) {
+      try { await bot.telegram.editMessageText(chatId, existing, null, msg, { parse_mode: 'MarkdownV2' }); return; } catch { }
+    }
+    const s = await bot.telegram.sendMessage(chatId, msg, { parse_mode: 'MarkdownV2' });
+    msgRefs[chatId] = s.message_id;
+  } catch {}
 }
+
 
 // ── NORMALIZE ──
 function n(s) {
@@ -159,7 +161,7 @@ async function verificarAvance() {
   const [dq,dqg]=await Promise.all([jget(`https://api.eduardolosilla.es/escrutinios?num_jornada=${JQ}&num_temporada=${TEMP}`),jget(`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${JQG}`)]);
   let c=false;
   if (dq?.partidos?.length && dq.estado==='ESCRUTADA' && todosFin(dq.partidos)) { const p=await detectar('q',JQ+1); if (p!==JQ) { JQ=p; c=true; console.log('Q→J'+JQ); } }
-  if (dqg?.partidos?.length && (dqg.escrutinio?.estadoJornada==='Escrutada'||(dqg.escrutinio?.estadoJornada==='Cerrada'&&todosFin(dqg.partidos)))) { const p=await detectar('qg',JQG+1); if (p!==JQG) { JQG=p; c=true; console.log('QG→J'+JQG); msgRef=null; } }
+  if (dqg?.partidos?.length && (dqg.escrutinio?.estadoJornada==='Escrutada'||(dqg.escrutinio?.estadoJornada==='Cerrada'&&todosFin(dqg.partidos)))) { const p=await detectar('qg',JQG+1); if (p!==JQG) { JQG=p; c=true; console.log('QG→J'+JQG); msgRefs={}; } }
   if (c) save();
 }
 
@@ -248,15 +250,13 @@ function startBlink() {
   if (blinkTimer) return;
   blinkTimer = setInterval(async () => {
     blinkState = !blinkState;
-    if (!msgRef || !grupo) return;
     const msg = buildBoletoBlink(blinkState);
-    if (!msg) return;
-    try {
-      await bot.telegram.editMessageText(grupo, msgRef.messageId, null, msg, { parse_mode: 'MarkdownV2' });
-      console.log('blink', blinkState ? '🟡' : '🟢');
-    } catch (e) {
-      if (e.description?.includes('message to edit not found') || e.code === 400) msgRef = null;
-      else console.error('blink err:', e.description || e.message);
+    if (!msg || !Object.keys(msgRefs).length) return;
+    for (const cid of Object.keys(msgRefs)) {
+      try { await bot.telegram.editMessageText(Number(cid), msgRefs[cid], null, msg, { parse_mode: 'MarkdownV2' }); } catch (e) {
+        if (e.description?.includes('message to edit not found') || e.code === 400) delete msgRefs[cid];
+        else console.error('blink err:', e.description || e.message);
+      }
     }
   }, 1000);
   console.log('BLINK ON');
@@ -317,9 +317,8 @@ async function check() {
 
     // Update boleto (always edit, never send new)
     const msg = buildBoletoFrom(todos, blinkState);
-    if (todos.length && msg) {
-      const s = await sendOrEdit(msg, msgRef);
-      if (s) msgRef = s;
+    if (todos.length && msg && grupo) {
+      await sendDeliver(msg, grupo);
     }
 
     // Manage blink timer
@@ -343,10 +342,10 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  ctx.reply(buildBoletoBlink(false), { parse_mode: 'MarkdownV2' });
+  await sendDeliver(buildBoletoBlink(false), ctx.chat.id);
 });
 bot.command('partidos', async (ctx) => {
-  ctx.reply(buildBoletoBlink(false), { parse_mode: 'MarkdownV2' });
+  await sendDeliver(buildBoletoBlink(false), ctx.chat.id);
 });
 
 // ── SERVER ──
