@@ -19,7 +19,9 @@ const CFG = join(__dirname, '..', 'datos', 'config.json');
 let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
 let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
-let msgRef = null; // { chatId, messageId } for editing boleto
+let msgRef = null;
+let blinkState = false;
+let blinkTimer = null;
 
 function load() {
   try { if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); admin = d.adminId; grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; } } catch {}
@@ -182,33 +184,44 @@ function abv(s, n) {
   return s.substring(0, n-1) + '.';
 }
 function pad(s, n) { s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); }
-function fmtBoleto(todos, tipo, j, tit) {
-  const f = todos.filter(p=>p.tipo===tipo);
+function fmtBoleto(todos, tipo, j, tit, blink) {
+  const f = todos.filter(p => p.tipo === tipo);
   if (!f.length) return '';
-  const v = f.filter(p=>!p.loc.toUpperCase().includes('DETERMINAR'));
+  const v = f.filter(p => !p.loc.toUpperCase().includes('DETERMINAR'));
   if (!v.length) return '';
-  const W = 12;
-  const viv = v.filter(p=>p.estado==='in').length;
-  const fin = v.filter(p=>p.estado==='post').length;
-  const pre = v.length-viv-fin;
-  let l = [];
+  const W = 10;
+  const viv = v.filter(p => p.estado === 'in').length;
+  const fin = v.filter(p => p.estado === 'post').length;
+  const pre = v.length - viv - fin;
+  const l = [];
   let h = `${tit} J${j}`;
   if (viv > 0) h += `  🟢 ${viv} en vivo`;
   if (fin === v.length) h += `  🏁 FINALIZADA`;
   l.push(h);
   l.push('```');
   for (const p of v) {
-    const ft = p.estado==='post'||p.fin;
-    const enVivo = p.estado==='in';
-    let gL='-', gV='-', min='', preok='';
-    if (ft) { gL=p.gL!==null?String(p.gL):'-'; gV=p.gV!==null?String(p.gV):'-'; min='FT'; }
-    else if (enVivo) { gL=p.gL!==null?String(p.gL):'0'; gV=p.gV!==null?String(p.gV):'0'; min=p.min; }
-    else { min=(p.dia||'').slice(0,3)+(p.hora?' '+p.hora:''); }
-    const loc = pad(abv(p.loc,W), W);
-    const vis = pad(abv(p.vis,W), W);
-    const sc = ft||enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
-    const rt = enVivo ? `🟢 ${p.num}` : `  ${p.num}`;
-    const mi = ft ? `${min} 🏁` : min;
+    const ft = p.estado === 'post' || p.fin;
+    const enVivo = p.estado === 'in';
+    let gL = '-', gV = '-', mi = '';
+    if (ft) {
+      gL = p.gL !== null ? String(p.gL) : '-';
+      gV = p.gV !== null ? String(p.gV) : '-';
+      mi = 'FT'.padStart(6);
+    } else if (enVivo) {
+      gL = p.gL !== null ? String(p.gL) : '0';
+      gV = p.gV !== null ? String(p.gV) : '0';
+      mi = (p.min || '').padStart(6);
+    } else {
+      const dd = (p.dia || '').slice(0, 3).toUpperCase();
+      const hh = p.hora ? p.hora.slice(0, 2) : '';
+      mi = (dd + hh).padStart(6);
+    }
+    const loc = pad(abv(p.loc, W), W);
+    const vis = pad(abv(p.vis, W), W);
+    const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
+    const nStr = String(p.num).padStart(2);
+    const liveEm = blink ? '🟡' : '🟢';
+    const rt = enVivo ? `${liveEm}${nStr}` : `  ${nStr}`;
     l.push(`${rt}  ${loc} ${sc}  ${vis} ${mi}`);
   }
   let footer = `${v.length} partidos`;
@@ -218,6 +231,28 @@ function fmtBoleto(todos, tipo, j, tit) {
   l.push(footer);
   l.push('```');
   return l.join('\n');
+}
+function buildBoleto(blink = false) {
+  const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
+  const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
+  return [bQ, bQG].filter(Boolean).join('\n\n');
+}
+
+// ── BLINK ──
+function startBlink() {
+  if (blinkTimer) return;
+  blinkTimer = setInterval(async () => {
+    blinkState = !blinkState;
+    const msg = buildBoleto(blinkState);
+    if (msg && msgRef) {
+      const s = await sendOrEdit(msg, msgRef);
+      if (s) msgRef = s;
+    }
+  }, 1000);
+  console.log('🟢 Blink ON');
+}
+function stopBlink() {
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; console.log('🔴 Blink OFF'); }
 }
 
 // ── MAIN ──
@@ -257,28 +292,30 @@ async function check() {
     }
 
     // Event notifications
-    let huboEvento = false;
     for (const p of todos) {
       if (p.estado==='pre') continue;
       const old = prev.find(e=>e.id===p.id);
       if (!old) continue;
-      if (old.estado==='pre'&&p.estado==='in') { huboEvento=true; await say(`🟢 COMENZÓ [${p.tipo}] ${p.loc} vs ${p.vis}`); }
+      if (old.estado==='pre'&&p.estado==='in') { await say(`🟢 COMENZÓ [${p.tipo}] ${p.loc} vs ${p.vis}`); }
       if (p.estado==='in'&&old.estado!=='post') {
         const gA=p.gL||0, gB=p.gV||0, pA=old.gL||0, pB=old.gV||0;
-        if (gA>pA) { huboEvento=true; await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
-        if (gB>pB) { huboEvento=true; await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
+        if (gA>pA) { await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
+        if (gB>pB) { await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${p.min})`); }
       }
-      if (p.estado==='post'&&old.estado!=='post') { huboEvento=true; await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`); }
+      if (p.estado==='post'&&old.estado!=='post') { await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`); }
     }
 
-    // Send / update boleto — edit on every poll for "blinking" effect
-    const bQ = fmtBoleto(todos,'Quiniela',JQ,'⚽ QUINIELA');
-    const bQG = fmtBoleto(todos,'Quinigol',JQG,'⚽ QUINIGOL');
-    const msg = [bQ,bQG].filter(Boolean).join('\n\n');
+    // Update boleto (always edit, never send new)
+    const msg = buildBoleto(blinkState);
     if (todos.length && msg) {
       const s = await sendOrEdit(msg, msgRef);
       if (s) msgRef = s;
     }
+
+    // Manage blink timer
+    const hasLive = todos.some(p => p.estado === 'in');
+    if (hasLive && !blinkTimer) startBlink();
+    if (!hasLive && blinkTimer) stopBlink();
 
     prev = todos;
   } catch (e) { console.error('check:', e.message); }
@@ -296,14 +333,10 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  const bQ = fmtBoleto(prev,'Quiniela',JQ,'⚽ QUINIELA');
-  const bQG = fmtBoleto(prev,'Quinigol',JQG,'⚽ QUINIGOL');
-  ctx.reply([bQ,bQG].filter(Boolean).join('\n\n'), { parse_mode: 'MarkdownV2' });
+  ctx.reply(buildBoleto(false), { parse_mode: 'MarkdownV2' });
 });
 bot.command('partidos', async (ctx) => {
-  const bQ = fmtBoleto(prev,'Quiniela',JQ,'⚽ QUINIELA');
-  const bQG = fmtBoleto(prev,'Quinigol',JQG,'⚽ QUINIGOL');
-  ctx.reply([bQ,bQG].filter(Boolean).join('\n\n'), { parse_mode: 'MarkdownV2' });
+  ctx.reply(buildBoleto(false), { parse_mode: 'MarkdownV2' });
 });
 
 // ── SERVER ──
