@@ -248,11 +248,39 @@ function buildBoletoFrom(data, blink = false) {
   return [bQ, bQG].filter(Boolean).join('\n\n');
 }
 
+// ── LIVE REFRESH ──
+async function refreshLiveScores() {
+  if (!prev.some(p => p.estado === 'in')) return;
+  try {
+    const ev = await espn();
+    for (const p of prev) {
+      if (p.estado !== 'in') continue;
+      const m = match(p.loc, p.vis, ev, p.dia);
+      if (!m) continue;
+      if (m.est === 'post') {
+        const gA = m.gL, gB = m.gV;
+        p.estado = 'post'; p.fin = true; p.gL = gA; p.gV = gB; p.min = 'FT';
+        await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${gA}-${gB} ${p.vis}`);
+      } else if (m.est === 'in') {
+        const gA = m.gL, gB = m.gV, pA = p.gL || 0, pB = p.gV || 0;
+        if (gA > pA) await say(`⚽ GOOOL de ${p.loc}! ${p.loc} ${gA}-${gB} ${p.vis} (${m.min})`);
+        if (gB > pB) await say(`⚽ GOOOL de ${p.vis}! ${p.loc} ${gA}-${gB} ${p.vis} (${m.min})`);
+        p.gL = gA; p.gV = gB; p.min = m.min;
+      }
+    }
+  } catch (e) { console.error('refreshLiveScores:', e.message); }
+}
+
 // ── BLINK ──
+let blinkTick = 0;
 function startBlink() {
   if (blinkTimer) return;
+  blinkTick = 0;
   blinkTimer = setInterval(async () => {
     blinkState = !blinkState;
+    blinkTick++;
+    // Every ~8s fetch fresh ESPN data to update scores/time
+    if (blinkTick % 8 === 0) await refreshLiveScores();
     const msg = buildBoletoBlink(blinkState);
     if (!msg || !Object.keys(msgRefs).length) return;
     for (const cid of Object.keys(msgRefs)) {
@@ -265,7 +293,7 @@ function startBlink() {
   console.log('BLINK ON');
 }
 function stopBlink() {
-  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; console.log('BLINK OFF'); }
+  if (blinkTimer) { clearInterval(blinkTimer); blinkTimer = null; blinkState = false; blinkTick = 0; console.log('BLINK OFF'); }
 }
 
 // ── MAIN ──
@@ -326,8 +354,16 @@ async function check() {
 
     // Manage blink timer
     const hasLive = todos.some(p => p.estado === 'in');
-    if (hasLive && !blinkTimer) startBlink();
-    if (!hasLive && blinkTimer) stopBlink();
+    if (hasLive && !blinkTimer) {
+      startBlink();
+      // Pin the boleto message while live matches exist
+      if (grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    }
+    if (!hasLive && blinkTimer) {
+      stopBlink();
+      // Unpin when no more live
+      if (grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    }
 
     prev = todos;
   } catch (e) { console.error('check:', e.message); }
