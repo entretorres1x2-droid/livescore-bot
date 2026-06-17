@@ -242,9 +242,12 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   l.push('```');
   return l.join('\n');
 }
+function escMD(s) {
+  return s.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+}
 function appendEvents(body) {
   if (!lastEvent) return body;
-  return body + '\n' + lastEvent;
+  return body + '\n' + escMD(lastEvent);
 }
 function buildBoletoBlink(blink = false) {
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
