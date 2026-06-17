@@ -628,14 +628,15 @@ const usarWebhook = !!process.env.RENDER_SERVICE_ID;
 
 createServer(async (req, res) => {
   if (usarWebhook && req.url === '/' && req.method === 'POST') {
-    try {
-      const buffers = [];
-      for await (const chunk of req) buffers.push(chunk);
-      const body = Buffer.concat(buffers).toString();
-      await bot.handleUpdate(JSON.parse(body));
-    } catch (e) {
-      console.error('Error en webhook:', e.message);
-    }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        await bot.handleUpdate(JSON.parse(body));
+      } catch (e) {
+        console.error('Error en webhook:', e.message);
+      }
+    });
     return res.end('OK');
   }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -646,7 +647,7 @@ createServer(async (req, res) => {
 
 async function iniciar() {
   if (usarWebhook) {
-    await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
+    await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true, allowed_updates: ['message', 'callback_query', 'my_chat_member'] });
     console.log('Webhook configurado en', RENDER_URL);
     setInterval(() => {
       fetch(`http://localhost:${PORT}`).catch(() => {});
