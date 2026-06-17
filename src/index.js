@@ -632,14 +632,34 @@ createServer(async (req, res) => {
   console.log(`Servidor en puerto ${PORT}`);
 });
 
+async function startBotPolling() {
+  let offset = 0;
+  console.log('🤖 Iniciando polling manual...');
+  const poll = async () => {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/getUpdates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offset, timeout: 30, allowed_updates: ['message', 'callback_query', 'my_chat_member'] })
+      });
+      const data = await res.json();
+      if (data.ok && data.result) {
+        for (const u of data.result) {
+          if (u.update_id >= offset) offset = u.update_id + 1;
+          try { await bot.handleUpdate(u); } catch (e) { console.error('Error update:', e.message); }
+        }
+      }
+    } catch (e) { console.error('Error polling:', e.message); }
+    setTimeout(poll, 1000);
+  };
+  poll();
+}
+
 async function iniciar() {
   await bot.telegram.deleteWebhook({ drop_pending_updates: true });
-  await bot.launch();
-  console.log('🤖 Bot iniciado (polling)');
-  // Auto-ping cada 3 min para evitar que Render duerma el servicio gratis
-  setInterval(() => {
-    fetch(`http://localhost:${PORT}`).catch(() => {});
-  }, 180000);
+  startBotPolling();
+  console.log('🤖 Bot iniciado (polling manual)');
+  setInterval(() => fetch(`http://localhost:${PORT}`).catch(() => {}), 180000);
   startPolling();
 }
 
