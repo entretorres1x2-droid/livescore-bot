@@ -1,21 +1,25 @@
 import { createServer } from 'http';
-import { Telegraf, Markup } from 'telegraf';
+import { Telegraf } from 'telegraf';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import config, { cargarJugadas } from './config.js';
-import { obtenerPartidosEnVivo, detectarGolesNuevos, detectarEventosPartido } from './scorer.js';
-import { resumenColumnas, detectarMuertas } from './analyzer.js';
-import { generarComentarioGol, generarComentarioInicio, generarComentarioFinal, generarComentarioMuertas, generarComentarioEstado, generarComentarioIA } from './commentary.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TEMPORADA = process.env.TEMPORADA || '2026';
+const J_Q = process.env.JORNADA_QUINIELA || '68';
+const J_QG = process.env.JORNADA_QUINIGOL || '78';
+const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL) || 60;
+const PORT = process.env.PORT || 8080;
+const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
 
-let partidosAnteriores = [];
+if (!TELEGRAM_BOT_TOKEN) { console.error('TELEGRAM_BOT_TOKEN no definido'); process.exit(1); }
+
+const bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 let adminId = null;
 let targetGroupId = null;
-let jugadas = cargarJugadas();
 const DATA_FILE = join(__dirname, '..', 'datos', 'config.json');
+let estadoAnterior = []; // { id, golesLocal, golesVisitante, estado, local, visitante, tipo }
 
 function loadData() {
   try {
@@ -26,7 +30,6 @@ function loadData() {
     }
   } catch {}
 }
-
 function saveData() {
   try {
     const dir = join(__dirname, '..', 'datos');
@@ -34,98 +37,238 @@ function saveData() {
     writeFileSync(DATA_FILE, JSON.stringify({ adminId, targetGroupId }));
   } catch {}
 }
-
 loadData();
 
-async function enviar(msg, extra) {
-  if (targetGroupId) {
-    try { await bot.telegram.sendMessage(targetGroupId, msg, extra || {}); } catch {}
-  }
-  if (adminId) {
-    try { await bot.telegram.sendMessage(adminId, msg, extra || {}); } catch {}
-  }
+async function enviar(msg) {
+  if (targetGroupId) try { await bot.telegram.sendMessage(targetGroupId, msg); } catch {}
+  if (adminId && adminId !== targetGroupId) try { await bot.telegram.sendMessage(adminId, msg); } catch {}
 }
 
-function topColumnas(columnas, max = 5) {
-  const vivas = columnas.filter(c => c.viva).sort((a, b) => b.maxPosible - a.maxPosible).slice(0, max);
-  const lineas = ['```', ' #  │ Jugada         │ Act │ Max │', '────┼────────────────┼─────┼─────┤'];
-  for (const c of vivas) {
-    const n = String(c.num).padStart(2);
-    const r = c.raw.length > 14 ? c.raw.slice(0, 14) : c.raw.padEnd(14);
-    const act = String(c.aciertos).padStart(3);
-    const max = c.viva ? `${c.maxPosible}✓`.padStart(4) : ' 💀';
-    lineas.push(` ${n} │ ${r} │ ${act} │ ${max} │`);
-  }
-  lineas.push('```');
-  return lineas.join('\n');
+// ---- HELPERS ----
+function normalize(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function fixName(t) {
+  const stop = ['real','fc','sd','ud','cd','cf','rc','sad','de','club','at','ath','vigo','r','b'];
+  const w = t.split(' ');
+  if (w.length <= 1) return t;
+  const f = w.filter(x => !stop.includes(x)).join(' ');
+  return f.length > 0 ? f : t;
+}
+const esp2eng = {
+  'alemania':'germany','argelia':'algeria','belgica':'belgium','brasil':'brazil','camerun':'cameroon',
+  'costa marfil':'ivory coast','croacia':'croatia','dinamarca':'denmark','escocia':'scotland',
+  'eslovaquia':'slovakia','eslovenia':'slovenia','espana':'spain','francia':'france','gales':'wales',
+  'grecia':'greece','inglaterra':'england','irlanda':'ireland','italia':'italy','japon':'japan',
+  'marruecos':'morocco','nueva zelanda':'new zealand','paises bajos':'netherlands','polonia':'poland',
+  'portugal':'portugal','rd congo':'congo dr','congo dr':'congo dr','rdc':'congo dr',
+  'rumania':'romania','sudafrica':'south africa','suecia':'sweden','suiza':'switzerland',
+  'tunez':'tunisia','turquia':'turkey','ucrania':'ukraine','bosnia':'bosnia','bosnia herzegovina':'bosnia',
+  'rep checa':'czech republic','checa':'czech','hungria':'hungary','corea del sur':'south korea',
+  'corea del norte':'north korea','irlanda del norte':'northern ireland','islas feroe':'faroe islands',
+  'cabo verde':'cape verde','uzbekistan':'uzbekistan','ghana':'ghana','panama':'panama',
+  'eeuu':'united states','usa':'united states','arabia saudi':'saudi arabia','turkiye':'turkey',
+};
+const override = { 'ath club':'athletic', 'at madrid':'atletico', 'r madrid':'madrid', 'psg':'paris',
+  'porto':'porto', 'oporto':'porto', 'friburgo':'freiburg', 'freiburg':'freiburg', 'celta':'celta',
+  'leverkusen':'leverkusen', 'stuttgart':'stuttgart', 'lyon':'lyon', 'genk':'genk' };
+
+function preparar(nombre) {
+  const n = normalize(nombre);
+  for (const [k,v] of Object.entries(override)) if (n.includes(k)) return v;
+  return fixName(esp2eng[n] || n);
+}
+function contiene(team, target) {
+  const c = s => normalize(s);
+  if (c(team.displayName).includes(target) || c(team.shortDisplayName||'').includes(target) || c(team.abbreviation||'').includes(target)) return true;
+  if (target.length >= 4 && c(team.displayName).includes(target.slice(0,4))) return true;
+  const pals = target.split(' ').filter(w => w.length > 2);
+  const clean = c(team.displayName);
+  return pals.filter(w => clean.includes(w)).length >= Math.min(2, Math.ceil(pals.length/2));
 }
 
-function formatearEstado(result) {
-  const r = resumenColumnas(jugadas, result.quinigol);
-  const lineas = [`📊 QUINIGOL`];
-  lineas.push(generarComentarioEstado(r.vivas, r.muertas, r.maxCategoria));
-  if (r.vivas > 0) lineas.push('\n' + topColumnas(r.columnas, 5));
-  if (r.muertas > 0) {
-    const muertas = r.columnas.filter(c => !c.viva).sort((a, b) => b.aciertos - a.aciertos).slice(0, 3);
-    lineas.push(`\n💀 Últimas muertas: ${muertas.map(m => `#${m.num}(${m.aciertos} act)`).join(', ')}`);
-  }
-  return lineas.join('\n');
+// ---- APIS ----
+async function getJSON(url) {
+  try {
+    const r = await fetch(url, { headers: { 'User-Agent': 'LiveScoreBot/1.0' } });
+    return r.ok ? r.json() : null;
+  } catch { return null; }
 }
 
+async function obtenerEventosESPN() {
+  const ahora = new Date();
+  const fmt = d => d.toISOString().slice(0,10).replace(/-/g,'');
+  const ini = fmt(new Date(ahora.getTime() - 4*864e5));
+  const fin = fmt(new Date(ahora.getTime() + 2*864e5));
+  const data = await getJSON(`https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates=${ini}-${fin}&limit=1000`);
+  return data?.events || [];
+}
+
+function extraer(ev) {
+  const c = ev.competitions?.[0];
+  if (!c) return null;
+  const home = c.competitors?.find(x => x.homeAway === 'home');
+  const away = c.competitors?.find(x => x.homeAway === 'away');
+  if (!home || !away) return null;
+  return {
+    id: ev.id, fecha: ev.date,
+    home: home.team, away: away.team,
+    gLocal: parseInt(home.score) || 0,
+    gVisit: parseInt(away.score) || 0,
+    minuto: ev.status?.displayClock || "0'",
+    estado: ev.status?.type?.state || 'pre',
+    detail: ev.status?.type?.shortDetail || '',
+  };
+}
+
+function buscarMatch(local, visit, eventos, dia) {
+  if (!dia) return null;
+  const esFecha = dia.includes('/');
+  let targetDia = null;
+  if (!esFecha) targetDia = normalize(dia).toUpperCase().slice(0,3);
+  const pLoc = preparar(local);
+  const pVis = preparar(visit);
+  if (pLoc.length < 2 || pVis.length < 2) return null;
+  for (const ev of eventos) {
+    const c = ev.competitions?.[0];
+    if (!c) continue;
+    if (!esFecha) {
+      const dayEng = new Date(ev.date).toLocaleDateString('en-US', { weekday:'short', timeZone:'Europe/Madrid' });
+      const map = { Sun:'DOM', Mon:'LUN', Tue:'MAR', Wed:'MIE', Thu:'JUE', Fri:'VIE', Sat:'SAB' };
+      if (map[dayEng] !== targetDia) continue;
+    }
+    const home = c.competitors?.find(x => x.homeAway === 'home');
+    const away = c.competitors?.find(x => x.homeAway === 'away');
+    if (!home || !away) continue;
+    if (contiene(home.team, pLoc) && contiene(away.team, pVis)) return extraer(ev);
+    if (contiene(home.team, pVis) && contiene(away.team, pLoc)) return extraer(ev);
+  }
+  return null;
+}
+
+async function cargarLosilla(tipo, j) {
+  const url = tipo === 'quiniela'
+    ? `https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMPORADA}`
+    : `https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMPORADA}&jornada=${j}`;
+  const data = await getJSON(url);
+  return data?.partidos || [];
+}
+
+function mapear(p, i, tipo) {
+  const loc = typeof p.local === 'object' ? p.local.nombre : p.local;
+  const vis = typeof p.visitante === 'object' ? p.visitante.nombre : p.visitante;
+  const resultado = p.resultado || p.marcador || '-:-';
+  const dia = tipo === 'quiniela' ? p.dia : p.horario?.dia;
+  const hora = tipo === 'quiniela' ? p.hora : p.horario?.hora;
+  let [gL, gV] = resultado !== '-:-' ? resultado.split('-').map(Number) : [null, null];
+  const finalizado = p.estado?.includes('Finalizado') || p.estado?.includes('Escrutado') || (resultado !== '-:-' && resultado !== '');
+  return { idx: i, local: loc, visitante: vis, dia, hora, golesLocal: isNaN(gL) ? null : gL, golesVisitante: isNaN(gV) ? null : gV, finalizado, tipo };
+}
+
+// ---- MAIN LOOP ----
 async function checkScores() {
   try {
-    const result = await obtenerPartidosEnVivo();
-    jugadas = cargarJugadas();
-    if (!result || result.todos.length === 0) return;
+    const [eventos, q1, qg] = await Promise.all([
+      obtenerEventosESPN(),
+      cargarLosilla('quiniela', J_Q),
+      cargarLosilla('quinigol', J_QG),
+    ]);
+    const jornadaQ = q1.map((p,i) => mapear(p,i,'quiniela'));
+    const jornadaQG = qg.map((p,i) => mapear(p,i,'quinigol'));
 
-    if (!partidosAnteriores || partidosAnteriores.length === 0) {
-      partidosAnteriores = result.todos;
-      const msg = formatearEstado(result);
-      if (msg) await enviar(msg, { parse_mode: 'Markdown' });
-      return;
+    const todos = [];
+    for (const p of jornadaQ) {
+      const m = buscarMatch(p.local, p.visitante, eventos, p.dia);
+      todos.push({
+        id: m ? m.id : `q-${p.idx}`,
+        local: p.local, visitante: p.visitante,
+        golesLocal: m ? m.gLocal : (p.finalizado ? p.golesLocal : null),
+        golesVisitante: m ? m.gVisit : (p.finalizado ? p.golesVisitante : null),
+        minuto: m ? m.minuto : (p.dia + ' ' + (p.hora||'')),
+        estado: m ? m.estado : (p.finalizado ? 'post' : 'pre'),
+        detalle: m ? m.detail : (p.finalizado ? 'FT' : 'Programado'),
+        finalizado: p.finalizado || false,
+        tipo: 'Quiniela',
+      });
+    }
+    for (const p of jornadaQG) {
+      const m = buscarMatch(p.local, p.visitante, eventos, p.dia);
+      todos.push({
+        id: m ? m.id : `qg-${p.idx}`,
+        local: p.local, visitante: p.visitante,
+        golesLocal: m ? m.gLocal : (p.finalizado ? p.golesLocal : null),
+        golesVisitante: m ? m.gVisit : (p.finalizado ? p.golesVisitante : null),
+        minuto: m ? m.minuto : (p.dia + ' ' + (p.hora||'')),
+        estado: m ? m.estado : (p.finalizado ? 'post' : 'pre'),
+        detalle: m ? m.detail : (p.finalizado ? 'FT' : 'Programado'),
+        finalizado: p.finalizado || false,
+        tipo: 'Quiniela',
+      });
     }
 
-    const eventos = detectarEventosPartido(result.todos, partidosAnteriores);
-    const goles = detectarGolesNuevos(result.todos, partidosAnteriores);
-    if (eventos.inicio.length === 0 && eventos.final.length === 0 && goles.length === 0) return;
+    for (const p of todos) {
+      if (p.estado === 'pre' && (p.golesLocal === null || p.golesVisitante === null)) continue;
+      const prev = estadoAnterior.find(e => e.id === p.id);
+      if (!prev) continue;
 
-    const muertasNuevas = detectarMuertas(jugadas, partidosAnteriores, result.todos);
-    const r = resumenColumnas(jugadas, result.quinigol);
+      // Inicio: pre -> in
+      if (prev.estado === 'pre' && p.estado === 'in') {
+        await enviar(`🟢 [${p.tipo}] COMENZÓ: ${p.local} vs ${p.visitante}`);
+      }
 
-    for (const p of eventos.inicio) {
-      await enviar(generarComentarioInicio(p));
+      // Gol: cambio de marcador en estado 'in'
+      if (p.estado === 'in' && prev.estado !== 'post') {
+        const gA = p.golesLocal || 0, gB = p.golesVisitante || 0;
+        const pA = prev.golesLocal || 0, pB = prev.golesVisitante || 0;
+        if (gA > pA) await enviar(`⚽ [${p.tipo}] GOOOL de ${p.local}! ${p.local} ${gA}-${gB} ${p.visitante} (${p.minuto})`);
+        if (gB > pB) await enviar(`⚽ [${p.tipo}] GOOOL de ${p.visitante}! ${p.local} ${gA}-${gB} ${p.visitante} (${p.minuto})`);
+      }
+
+      // Final: cualquier estado -> post
+      if (p.estado === 'post' && prev.estado !== 'post') {
+        await enviar(`🏁 [${p.tipo}] FINAL: ${p.local} ${p.golesLocal}-${p.golesVisitante} ${p.visitante}`);
+      }
     }
 
-    for (const gol of goles) {
-      const impacto = { ...r, muertas: muertasNuevas };
-      const msg = await generarComentarioIA(gol, impacto);
-      await enviar(msg, { parse_mode: 'Markdown' });
-    }
-
-    for (const p of eventos.final) {
-      await enviar(generarComentarioFinal(p));
-    }
-
-    if (eventos.inicio.length > 0 || eventos.final.length > 0 || goles.length > 0) {
-      const estado = formatearEstado(result);
-      if (estado) await enviar(estado, { parse_mode: 'Markdown' });
-    }
-
-    partidosAnteriores = result.todos;
+    estadoAnterior = todos;
   } catch (err) {
-    console.error('checkScores error:', err.message);
+    console.error('checkScores:', err.message);
   }
 }
 
+function formatearJornada() {
+  if (estadoAnterior.length === 0) return 'Cargando jornada...';
+  const q = estadoAnterior.filter(p => p.tipo === 'Quiniela');
+  const qg = estadoAnterior.filter(p => p.tipo !== 'Quiniela');
+  let msg = '📅 JORNADA\n';
+  if (q.length > 0) {
+    msg += '\n⚽ QUINIELA:\n' + q.map((p,i) => {
+      const s = p.golesLocal !== null ? `${p.golesLocal}-${p.golesVisitante}` : '-:-';
+      const m = p.estado === 'post' ? 'FT' : (p.estado === 'in' ? p.minuto : '');
+      return `${i+1}. ${p.local} ${s} ${p.visitante}${m ? ' ('+m+')' : ''}`;
+    }).join('\n');
+  }
+  if (qg.length > 0) {
+    msg += '\n\n⚽ QUINIGOL:\n' + qg.map((p,i) => {
+      const s = p.golesLocal !== null ? `${p.golesLocal}-${p.golesVisitante}` : '-:-';
+      const m = p.estado === 'post' ? 'FT' : (p.estado === 'in' ? p.minuto : '');
+      return `${i+1}. ${p.local} ${s} ${p.visitante}${m ? ' ('+m+')' : ''}`;
+    }).join('\n');
+  }
+  return msg;
+}
+
+// ---- BOT ----
 bot.on('my_chat_member', async (ctx) => {
-  const update = ctx.myChatMember;
-  if (!update) return;
-  const chat = update.chat;
+  const u = ctx.myChatMember;
+  if (!u) return;
+  const chat = u.chat;
   if (chat.type === 'group' || chat.type === 'supergroup') {
-    if (update.new_chat_member.status === 'member' || update.new_chat_member.status === 'administrator') {
+    if (u.new_chat_member.status === 'member' || u.new_chat_member.status === 'administrator') {
       targetGroupId = chat.id;
       saveData();
-      if (adminId) await bot.telegram.sendMessage(adminId, `Grupo "${chat.title}" vinculado. Notis irán allí.`);
+      if (adminId) await bot.telegram.sendMessage(adminId, `✅ Grupo "${chat.title}" vinculado.`);
+      await enviar('🤖 Bot activo. Aquí llegarán las notificaciones de la jornada.');
     }
   }
 });
@@ -134,119 +277,41 @@ bot.start((ctx) => {
   if (ctx.chat.type !== 'private') return ctx.reply('Contrólame por privado @SS_Goles_bot');
   adminId = ctx.chat.id;
   saveData();
-  const msg = `¡Bienvenido al Quinigol Bot!
-
-Sube un .txt con tus columnas Quinigol (12 chars cada línea)
-Ej: 012M1011M200
-
-Después te notificaré aquí y en el grupo cada gol/evento.`;
-  ctx.reply(msg);
+  ctx.reply('✅ Bot activo. Añádeme a un grupo para recibir notificaciones en vivo de la jornada.');
 });
 
-bot.help((ctx) => ctx.reply(
-  '/start - Bienvenida\n' +
-  '/jugada - Subir archivo .txt con columnas\n' +
-  '/vivas - Estado actual de las columnas\n' +
-  '/jornada - Partidos de la jornada'
-));
-
-function kb(ctx) {
-  return ctx.chat.type === 'private' ? Markup.removeKeyboard() : Markup.removeKeyboard();
-}
+bot.command('jornada', async (ctx) => {
+  ctx.reply(formatearJornada());
+});
+bot.command('partidos', async (ctx) => {
+  ctx.reply(formatearJornada());
+});
 
 bot.use(async (ctx, next) => {
   if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') return;
   return next();
 });
 
-bot.command('jugada', async (ctx) => {
-  if (ctx.chat.type !== 'private') return;
-  ctx.session = ctx.session || {};
-  ctx.session.esperandoArchivo = true;
-  ctx.reply('Envía el archivo .txt con las columnas Quinigol (12 chars cada línea).');
-});
-
-bot.command('vivas', async (ctx) => {
-  const result = await obtenerPartidosEnVivo();
-  const msg = formatearEstado(result);
-  ctx.reply(msg, { parse_mode: 'Markdown' });
-});
-
-bot.command('jornada', async (ctx) => {
-  const result = await obtenerPartidosEnVivo();
-  if (result.quinigol.length === 0) return ctx.reply('No hay partidos de Quinigol ahora.');
-  const msg = '⚽ JORNADA QUINIGOL\n' + result.quinigol.map(p => {
-    const s = p.golesLocal !== null ? `${p.golesLocal}-${p.golesVisitante}` : '-:-';
-    const m = p.minuto === '0\'' ? '' : ` (${p.minuto})`;
-    return `${p.local} ${s} ${p.visitante}${m}`;
-  }).join('\n');
-  ctx.reply(msg);
-});
-
-bot.on('text', async (ctx) => {
-  const s = ctx.session = ctx.session || {};
-  if (s.esperandoArchivo) {
-    s.esperandoArchivo = false;
-    ctx.reply('Espera el archivo .txt. Usa 📎 > Archivo.');
-  }
-});
-
-bot.on('document', async (ctx) => {
-  if (ctx.chat.type !== 'private') return;
-  try {
-    const doc = ctx.message.document;
-    if (!doc.file_name.endsWith('.txt')) return ctx.reply('Solo .txt');
-
-    const fileLink = await ctx.telegram.getFileLink(doc.file_id);
-    const resp = await fetch(fileLink.href);
-    const text = await resp.text();
-
-    const lineas = text.split('\n')
-      .map(l => l.trim())
-      .filter(l => l && !l.startsWith('#') && !l.startsWith('//'));
-
-    const validas = lineas.filter(l => l.length >= 12 && /^[012Mm]{12}$/.test(l));
-    if (validas.length === 0) return ctx.reply('No se encontraron columnas Quinigol válidas (12 chars, solo 0/1/2/M).');
-
-    const dir = join(__dirname, '..', 'datos');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'quinigol.txt'), validas.join('\n'), 'utf-8');
-    jugadas = validas;
-
-    await ctx.reply(`✅ ${validas.length} columnas cargadas.`);
-    const result = await obtenerPartidosEnVivo();
-    const estado = formatearEstado(result);
-    if (estado) await enviar(estado, { parse_mode: 'Markdown' });
-  } catch (err) {
-    ctx.reply(`Error: ${err.message}`);
-  }
-});
-
-const PORT = process.env.PORT || 8080;
-const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
-
+// ---- SERVER ----
 createServer((req, res) => {
   if (req.url === '/' && req.method === 'POST') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', c => body += c);
     req.on('end', async () => {
       try { await bot.handleUpdate(JSON.parse(body)); } catch {}
     });
-    res.end('OK');
-    return;
+    res.end('OK'); return;
   }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
-}).listen(PORT, '0.0.0.0', () => {
-  console.log(`Server on port ${PORT}`);
-});
+}).listen(PORT, '0.0.0.0', () => console.log(`Server :${PORT}`));
 
+// ---- START ----
 async function iniciar() {
-  await bot.telegram.setWebhook(RENDER_URL, { allowed_updates: ['message', 'callback_query', 'my_chat_member'] });
+  await bot.telegram.setWebhook(RENDER_URL);
   console.log('Webhook OK');
-  console.log(`Iniciando polling cada ${config.POLL_INTERVAL}s...`);
+  console.log(`Poll cada ${POLL_INTERVAL}s`);
   await checkScores();
-  setInterval(checkScores, config.POLL_INTERVAL * 1000);
+  setInterval(checkScores, POLL_INTERVAL * 1000);
 }
-
-iniciar().catch(e => console.error('Error:', e.message));
+iniciar().catch(e => { console.error('Error:', e.message); process.exit(1); });
