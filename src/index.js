@@ -625,52 +625,21 @@ async function startPolling() {
 const PORT = process.env.PORT || 8080;
 const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
 
-// Si estamos en Render, usar webhook en vez de polling
-const usarWebhook = !!process.env.RENDER_SERVICE_ID;
-
 createServer(async (req, res) => {
-  // Webhook handler para Telegram
-  if (usarWebhook && req.url === '/' && req.method === 'POST') {
-    try {
-      const buffers = [];
-      for await (const chunk of req) buffers.push(chunk);
-      const body = Buffer.concat(buffers).toString();
-      await bot.handleUpdate(JSON.parse(body));
-    } catch (e) {
-      console.error('Error en webhook:', e.message);
-    }
-    return res.end('OK');
-  }
-
-  // Health check
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor en puerto ${PORT} (webhook: ${usarWebhook})`);
+  console.log(`Servidor en puerto ${PORT}`);
 });
 
 async function iniciar() {
-  if (usarWebhook) {
-    await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
-    console.log('Webhook configurado en', RENDER_URL);
-    // Re-set webhook cada 200ms para vencer al bot viejo en JustRunMy
-    setInterval(async () => {
-      try {
-        const info = await bot.telegram.getWebhookInfo();
-        if (info.url !== RENDER_URL) {
-          await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
-          console.log('Webhook re-set (era:', info.url || '(vacío)', ')');
-        }
-      } catch (e) {}
-    }, 200);
-    // Auto-ping cada 3 min para evitar que Render duerma el servicio gratis
-    setInterval(() => {
-      fetch(`http://localhost:${PORT}`).catch(() => {});
-    }, 180000);
-  } else {
-    await bot.launch();
-    console.log('🤖 Bot iniciado (polling)');
-  }
+  await bot.telegram.deleteWebhook({ drop_pending_updates: true });
+  await bot.launch();
+  console.log('🤖 Bot iniciado (polling)');
+  // Auto-ping cada 3 min para evitar que Render duerma el servicio gratis
+  setInterval(() => {
+    fetch(`http://localhost:${PORT}`).catch(() => {});
+  }, 180000);
   startPolling();
 }
 
