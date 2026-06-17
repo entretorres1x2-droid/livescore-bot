@@ -651,18 +651,20 @@ createServer(async (req, res) => {
 
 async function iniciar() {
   if (usarWebhook) {
-    await bot.telegram.setWebhook(RENDER_URL);
+    // Cerrar sesión previa (JustRunMy) y configurar webhook
+    try { await bot.telegram.callApi('close'); } catch(e) {}
+    await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
     console.log('Webhook configurado en', RENDER_URL);
-    // Re-set webhook cada 1s para vencer al bot viejo en JustRunMy
+    // Re-set webhook cada 200ms para vencer al bot viejo en JustRunMy
     setInterval(async () => {
       try {
         const info = await bot.telegram.getWebhookInfo();
         if (info.url !== RENDER_URL) {
-          await bot.telegram.setWebhook(RENDER_URL);
+          await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
           console.log('Webhook re-set (era:', info.url || '(vacío)', ')');
         }
       } catch (e) {}
-    }, 1000);
+    }, 200);
     // Auto-ping cada 3 min para evitar que Render duerma el servicio gratis
     setInterval(() => {
       fetch(`http://localhost:${PORT}`).catch(() => {});
