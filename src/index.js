@@ -624,47 +624,34 @@ async function startPolling() {
 // Health check + webhook server
 const PORT = process.env.PORT || 8080;
 const RENDER_URL = 'https://livescore-bot-qpoh.onrender.com';
+const usarWebhook = !!process.env.RENDER_SERVICE_ID;
 
 createServer(async (req, res) => {
+  if (usarWebhook && req.url === '/' && req.method === 'POST') {
+    try {
+      const buffers = [];
+      for await (const chunk of req) buffers.push(chunk);
+      const body = Buffer.concat(buffers).toString();
+      await bot.handleUpdate(JSON.parse(body));
+    } catch (e) {
+      console.error('Error en webhook:', e.message);
+    }
+    return res.end('OK');
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
 }).listen(PORT, '0.0.0.0', () => {
-  console.log(`Servidor en puerto ${PORT}`);
+  console.log(`Servidor en puerto ${PORT} (webhook: ${usarWebhook})`);
 });
 
-const API = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}`;
-
-async function apiCall(method, data = {}) {
-  const res = await fetch(`${API}/${method}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
-  });
-  return res.json();
-}
-
-async function startBotPolling() {
-  let offset = 0;
-  console.log('🤖 Iniciando polling manual...');
-  // Eliminar cualquier webhook previo
-  try { await apiCall('deleteWebhook', { drop_pending_updates: true }); } catch(e) {}
-  const poll = async () => {
-    try {
-      const data = await apiCall('getUpdates', { offset, timeout: 30, allowed_updates: ['message', 'callback_query', 'my_chat_member'] });
-      if (data.ok && data.result) {
-        for (const u of data.result) {
-          if (u.update_id >= offset) offset = u.update_id + 1;
-          try { await bot.handleUpdate(u); } catch (e) { console.error('Error update:', e.message); }
-        }
-      }
-    } catch (e) { console.error('Error polling:', e.message); }
-    setTimeout(poll, 1000);
-  };
-  poll();
-}
-
 async function iniciar() {
-  await startBotPolling();
-  console.log('🤖 Bot iniciado');
-  setInterval(() => fetch(`http://localhost:${PORT}`).catch(() => {}), 180000);
+  if (usarWebhook) {
+    await bot.telegram.setWebhook(RENDER_URL, { drop_pending_updates: true });
+    console.log('Webhook configurado en', RENDER_URL);
+    setInterval(() => {
+      fetch(`http://localhost:${PORT}`).catch(() => {});
+    }, 180000);
+  }
   startPolling();
 }
 
