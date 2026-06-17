@@ -191,7 +191,7 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   if (!f.length) return '';
   const v = f.filter(p => !p.loc.toUpperCase().includes('DETERMINAR'));
   if (!v.length) return '';
-  const W = 10;
+    const W = 9;
   const viv = v.filter(p => p.estado === 'in').length;
   const fin = v.filter(p => p.estado === 'post').length;
   const pre = v.length - viv - fin;
@@ -208,15 +208,15 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
     if (ft) {
       gL = p.gL !== null ? String(p.gL) : '-';
       gV = p.gV !== null ? String(p.gV) : '-';
-      mi = 'FT'.padStart(6);
+      mi = 'FT'.padStart(5);
     } else if (enVivo) {
       gL = p.gL !== null ? String(p.gL) : '0';
       gV = p.gV !== null ? String(p.gV) : '0';
-      mi = (p.min || '').padStart(6);
+      mi = (p.min || '').padStart(5);
     } else {
       const dd = (p.dia || '').slice(0, 3).toUpperCase();
       const hh = p.hora ? p.hora.slice(0, 2) : '';
-      mi = (dd + hh).padStart(6);
+      mi = (dd + hh).padStart(5);
     }
     const loc = pad(abv(p.loc, W), W);
     const vis = pad(abv(p.vis, W), W);
@@ -224,7 +224,7 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
     const nStr = String(p.num).padStart(2);
     const liveEm = blink ? '🔴' : '🟢';
     const rt = enVivo ? `${liveEm}${nStr}` : `  ${nStr}`;
-    l.push(`${rt}  ${loc} ${sc}  ${vis} ${mi}`);
+    l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
   }
   let footer = `${v.length} partidos`;
   if (viv > 0) footer += `  🟢 ${viv}`;
