@@ -343,16 +343,21 @@ function extraerDatosPartido(event) {
 
 function buscarMatch(local, visitante, eventos, diaSemana) {
   if (!diaSemana) return null;
-  const targetDia = normalize(diaSemana).toUpperCase().slice(0, 3);
+  // Si diaSemana contiene "/" es fecha (DD/MM), ignorar filtro de día
+  const esFecha = diaSemana.includes('/');
+  let targetDia = null;
+  if (!esFecha) targetDia = normalize(diaSemana).toUpperCase().slice(0, 3);
 
   for (const ev of eventos) {
     const comp = ev.competitions?.[0];
     if (!comp) continue;
 
-    const dayEng = new Date(ev.date).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Europe/Madrid' });
-    const mapDia = { Sun: 'DOM', Mon: 'LUN', Tue: 'MAR', Wed: 'MIE', Thu: 'JUE', Fri: 'VIE', Sat: 'SAB' };
-    const evDia = mapDia[dayEng];
-    if (!evDia || evDia !== targetDia) continue;
+    if (!esFecha) {
+      const dayEng = new Date(ev.date).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'Europe/Madrid' });
+      const mapDia = { Sun: 'DOM', Mon: 'LUN', Tue: 'MAR', Wed: 'MIE', Thu: 'JUE', Fri: 'VIE', Sat: 'SAB' };
+      const evDia = mapDia[dayEng];
+      if (!evDia || evDia !== targetDia) continue;
+    }
 
     const home = comp.competitors?.find(c => c.homeAway === 'home');
     const away = comp.competitors?.find(c => c.homeAway === 'away');
@@ -361,11 +366,9 @@ function buscarMatch(local, visitante, eventos, diaSemana) {
     const homeName = normalize(home.team.displayName);
     const awayName = normalize(away.team.displayName);
 
-    // Emparejamiento estricto: local con home, visitante con away
     if (matchEquipos(local, homeName) && matchEquipos(visitante, awayName)) {
       return extraerDatosPartido(ev);
     }
-    // Fallback: local con away, visitante con home (por si Losilla los da invertidos)
     if (matchEquipos(local, awayName) && matchEquipos(visitante, homeName)) {
       return extraerDatosPartido(ev);
     }
