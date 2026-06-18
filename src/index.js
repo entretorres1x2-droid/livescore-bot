@@ -330,13 +330,20 @@ function getScoreStr(p) {
 
 // ── LIVE REFRESH ──
 async function refreshLiveScores() {
-  if (!prev.some(p => p.estado === 'in')) return;
+  const hadLive = prev.some(p => p.estado === 'in');
+  let nowLive = false;
   try {
     const ev = await espn();
     for (const p of prev) {
-      if (p.estado !== 'in') continue;
       const m = match(p.loc, p.vis, ev, p.dia);
       if (!m) continue;
+      // Detect match start (pre → in)
+      if (p.estado === 'pre' && m.est === 'in') {
+        p.estado = 'in'; p.gL = m.gL; p.gV = m.gV; p.min = m.min;
+        await say(`🟢 COMENZÓ [${p.tipo}] ${p.loc} vs ${p.vis}`);
+      }
+      if (p.estado !== 'in') continue;
+      nowLive = true;
       // Fetch event detail for plays/cards/etc.
       const det = await jget(`https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard/${m.id}`);
       const details = det?.competitions?.[0]?.details || [];
@@ -349,12 +356,10 @@ async function refreshLiveScores() {
         const pl = playerName(d);
         const sc = getScoreStr(p);
         const isAnim = !!evMsg[d.type.text];
-        // Animated notification for goals/cards
         if (isAnim) {
           const frames = evMsg[d.type.text](d, pl, p.loc, p.vis, sc);
           await sayAnimated(frames, 2000);
         }
-        // Update ticker under boleto (ALL types)
         lastEvent = getTicker(d, pl, p.loc, p.vis, sc);
       }
       if (m.est === 'post') {
@@ -367,6 +372,15 @@ async function refreshLiveScores() {
         if (gB > pB) p.gV = gB;
         p.min = m.min;
       }
+    }
+    // Start/stop live mode based on current state
+    if (nowLive && !blinkTimer) {
+      startBlink();
+      if (grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    }
+    if (!nowLive && blinkTimer) {
+      stopBlink();
+      if (grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
     }
   } catch (e) { console.error('refreshLiveScores:', e.message); }
 }
