@@ -20,8 +20,6 @@ let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
 let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
 let msgRefs = {}; // { [chatId]: messageId }
-let blinkState = false;
-let blinkTimer = null;
 let liveCheckTimer = null;
 
 function load() {
@@ -192,12 +190,12 @@ function abv(s, n) {
   return s.substring(0, n-1) + '.';
 }
 function pad(s, n) { s=String(s); return s.length>=n?s:s+' '.repeat(n-s.length); }
-function fmtBoleto(todos, tipo, j, tit, blink) {
+function fmtBoleto(todos, tipo, j, tit) {
   const f = todos.filter(p => p.tipo === tipo);
   if (!f.length) return '';
   const v = f.filter(p => !p.loc.toUpperCase().includes('DETERMINAR'));
   if (!v.length) return '';
-    const W = 7;
+  const W = 7;
   const viv = v.filter(p => p.estado === 'in').length;
   const fin = v.filter(p => p.estado === 'post').length;
   const pre = v.length - viv - fin;
@@ -227,15 +225,11 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
       mi = (dd + hh).padStart(6);
     }
     const nStr = String(p.num).padStart(2);
+    const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
     const loc = pad(abv(p.loc, W), W);
     const vis = pad(abv(p.vis, W), W);
     const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
-    if (enVivo && blink) {
-      l.push(` ${nStr} ${loc} ${sc} ${vis} ${' '.repeat(6)}`);
-    } else {
-      const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
-      l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
-    }
+    l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
   }
   let footer = `${v.length} partidos`;
   if (viv > 0) footer += `  🟢 ${viv}`;
@@ -252,14 +246,9 @@ function appendEvents(body) {
   if (!lastEvent) return body;
   return body + '\n' + escMD(lastEvent);
 }
-function buildBoletoBlink(blink = false) {
-  const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA', blink);
-  const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
-  return appendEvents([bQ, bQG].filter(Boolean).join('\n\n'));
-}
-function buildBoletoFrom(data, blink = false) {
-  const bQ = fmtBoleto(data, 'Quiniela', JQ, '⚽ QUINIELA', blink);
-  const bQG = fmtBoleto(data, 'Quinigol', JQG, '⚽ QUINIGOL', blink);
+function buildBoleto() {
+  const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA');
+  const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL');
   return appendEvents([bQ, bQG].filter(Boolean).join('\n\n'));
 }
 
@@ -360,7 +349,7 @@ async function refreshLiveScores() {
           const frames = evMsg[d.type.text](d, pl, p.loc, p.vis, sc);
           await sayAnimated(frames, 2000);
         }
-        lastEvent = getTicker(d, pl, p.loc, p.vis, sc);
+        lastEvent = `[#${p.num}] ${getTicker(d, pl, p.loc, p.vis, sc)}`;
       }
       if (m.est === 'post') {
         const gA = m.gL, gB = m.gV;
@@ -373,58 +362,26 @@ async function refreshLiveScores() {
         p.min = m.min;
       }
     }
-    // Start/stop live mode based on current state
-    if (nowLive && !blinkTimer) {
-      startBlink();
-      if (grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    // Update displayed boleto if there are live matches or just changed
+    if (nowLive || hadLive) {
+      const msg = buildBoleto();
+      if (msg && grupo && msgRefs[grupo]) {
+        await sendDeliver(msg, grupo);
+      }
     }
-    if (!nowLive && blinkTimer) {
-      stopBlink();
-      if (grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
-    }
+    // Pin/unpin based on live state
+    if (nowLive && grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    if (!nowLive && hadLive && grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
   } catch (e) { console.error('refreshLiveScores:', e.message); }
 }
 
-// ── BLINK ──
-let blinkTick = 0;
-function startBlink() {
-  if (blinkTimer) return;
-  blinkTick = 0;
-  let rate = 1000;
-  const tick = async () => {
-    if (!blinkTimer) return;
-    blinkState = !blinkState;
-    blinkTick++;
-    const msg = buildBoletoBlink(blinkState);
-    if (!msg || !Object.keys(msgRefs).length) { stopBlink(); return; }
-    let allFail = true;
-    for (const cid of Object.keys(msgRefs)) {
-      try { await bot.telegram.editMessageText(Number(cid), msgRefs[cid], null, msg, { parse_mode: 'MarkdownV2' }); allFail = false; } catch (e) {
-        const desc = e.description || '';
-        if (desc.includes('message to edit not found')) delete msgRefs[cid];
-        else if (desc.includes('Too Many Requests')) allFail = true;
-        else { allFail = false; console.error('blink err:', desc); }
-      }
-    }
-    // Increase interval if rate limited
-    if (allFail && rate < 10000) rate = Math.min(rate + 2000, 10000);
-    else if (!allFail && rate > 1000) rate = Math.max(rate - 500, 1000);
-    blinkTimer = setTimeout(tick, rate);
-  };
-  blinkTimer = setTimeout(tick, 100);
-  console.log('BLINK ON');
-}
-function stopBlink() {
-  if (blinkTimer) { clearTimeout(blinkTimer); blinkTimer = null; blinkState = false; blinkTick = 0; console.log('BLINK OFF'); }
-}
-
-// ── INDEPENDENT LIVE CHECK ──
+// ── LIVE CHECK ──
 function startLiveCheck() {
   if (liveCheckTimer) return;
   const tick = async () => {
     if (!liveCheckTimer) return;
     await refreshLiveScores();
-    liveCheckTimer = setTimeout(tick, 15000);
+    liveCheckTimer = setTimeout(tick, 10000);
   };
   liveCheckTimer = setTimeout(tick, 1000);
 }
@@ -482,26 +439,17 @@ async function check() {
       if (p.estado==='post'&&old.estado!=='post') { await say(`🏁 FINAL [${p.tipo}] ${p.loc} ${p.gL}-${p.gV} ${p.vis}`); }
     }
 
-    // Update boleto (always edit, never send new)
-    const msg = buildBoletoFrom(todos, blinkState);
+    prev = todos;
+    // Update boleto
+    const msg = buildBoleto();
     if (todos.length && msg && grupo) {
       await sendDeliver(msg, grupo);
     }
 
-    // Manage blink timer
+    // Pin if live matches exist
     const hasLive = todos.some(p => p.estado === 'in');
-    if (hasLive && !blinkTimer) {
-      startBlink();
-      // Pin the boleto message while live matches exist
-      if (grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
-    }
-    if (!hasLive && blinkTimer) {
-      stopBlink();
-      // Unpin when no more live
-      if (grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
-    }
-
-    prev = todos;
+    if (hasLive && grupo && msgRefs[grupo]) try { await bot.telegram.pinChatMessage(grupo, msgRefs[grupo]); } catch {}
+    if (!hasLive && grupo && msgRefs[grupo]) try { await bot.telegram.unpinChatMessage(grupo, msgRefs[grupo]); } catch {}
   } catch (e) { console.error('check:', e.message); }
 }
 
@@ -517,15 +465,15 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  await sendDeliver(buildBoletoBlink(false), ctx.chat.id);
+  await sendDeliver(buildBoleto(), ctx.chat.id);
 });
 bot.command('partidos', async (ctx) => {
-  await sendDeliver(buildBoletoBlink(false), ctx.chat.id);
+  await sendDeliver(buildBoleto(), ctx.chat.id);
 });
 bot.command('debug', async (ctx) => {
   const s = [];
   s.push(`JQ=${JQ} JQG=${JQG}`);
-  s.push(`grupo=${grupo} admin=${admin} blink=${!!blinkTimer}`);
+  s.push(`grupo=${grupo} admin=${admin}`);
   s.push(`prev=${prev.length} msgRefs=${Object.keys(msgRefs).length}`);
   s.push(`hasLive=${prev.some(p=>p.estado==='in')}`);
   for (let i=0; i<Math.min(prev.length, 3); i++) {
