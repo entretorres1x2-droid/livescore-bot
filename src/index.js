@@ -204,7 +204,6 @@ function fmtBoleto(todos, tipo, j, tit) {
   if (viv > 0) h += `  🟢 ${viv} en vivo`;
   if (fin === v.length) h += `  🏁 FINALIZADA`;
   l.push(h);
-  l.push('```');
   for (const p of v) {
     const ft = p.estado === 'post' || p.fin;
     const enVivo = p.estado === 'in';
@@ -232,14 +231,18 @@ function fmtBoleto(todos, tipo, j, tit) {
     l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
   }
   l.push(footer);
-  if (lastEvent) l.push(lastEvent);
-  l.push('```');
   return l.join('\n');
 }
 function buildBoleto() {
+  const parts = [];
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA');
   const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL');
-  return [bQ, bQG].filter(Boolean).join('\n\n');
+  if (bQ) parts.push(bQ);
+  if (bQG) parts.push(bQG);
+  if (!parts.length) return '';
+  let body = parts.join('\n');
+  if (lastEvent) body += '\n' + lastEvent;
+  return '```\n' + body + '\n```';
 }
 
 // ── EVENTS ──
