@@ -225,31 +225,21 @@ function fmtBoleto(todos, tipo, j, tit) {
       mi = (dd + hh).padStart(6);
     }
     const nStr = String(p.num).padStart(2);
-    const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
+    const rt = enVivo ? `❗${nStr}` : ` ${nStr}`;
     const loc = pad(abv(p.loc, W), W);
     const vis = pad(abv(p.vis, W), W);
     const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
     l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
   }
-  let footer = `${v.length} partidos`;
-  if (viv > 0) footer += `  🟢 ${viv}`;
-  if (fin > 0) footer += `  🏁 ${fin}`;
-  if (pre > 0) footer += `  ⏳ ${pre}`;
   l.push(footer);
+  if (lastEvent) l.push(lastEvent);
   l.push('```');
   return l.join('\n');
-}
-function escMD(s) {
-  return s.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
-}
-function appendEvents(body) {
-  if (!lastEvent) return body;
-  return body + '\n' + escMD(lastEvent);
 }
 function buildBoleto() {
   const bQ = fmtBoleto(prev, 'Quiniela', JQ, '⚽ QUINIELA');
   const bQG = fmtBoleto(prev, 'Quinigol', JQG, '⚽ QUINIGOL');
-  return appendEvents([bQ, bQG].filter(Boolean).join('\n\n'));
+  return [bQ, bQG].filter(Boolean).join('\n\n');
 }
 
 // ── EVENTS ──
@@ -468,11 +458,13 @@ bot.command('jornada', async (ctx) => {
   const msg = buildBoleto();
   if (msg) await sendDeliver(msg, ctx.chat.id);
   else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
+  if (ctx.chat.id !== grupo) { try { await ctx.reply('✅ Boleto enviado', K); } catch {} }
 });
 bot.command('partidos', async (ctx) => {
   const msg = buildBoleto();
   if (msg) await sendDeliver(msg, ctx.chat.id);
   else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
+  if (ctx.chat.id !== grupo) { try { await ctx.reply('✅ Boleto enviado', K); } catch {} }
 });
 bot.command('debug', async (ctx) => {
   const s = [];
