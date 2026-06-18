@@ -563,5 +563,6 @@ async function init() {
   console.log('Webhook OK');
   await check();
   setInterval(check, INT*1000);
+  startLiveCheck();
 }
 init().catch(e=>{console.error(e.message);process.exit(1);});
