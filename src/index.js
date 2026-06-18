@@ -465,10 +465,14 @@ bot.on('my_chat_member', async (ctx) => {
 });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
-  await sendDeliver(buildBoleto(), ctx.chat.id);
+  const msg = buildBoleto();
+  if (msg) await sendDeliver(msg, ctx.chat.id);
+  else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
 });
 bot.command('partidos', async (ctx) => {
-  await sendDeliver(buildBoleto(), ctx.chat.id);
+  const msg = buildBoleto();
+  if (msg) await sendDeliver(msg, ctx.chat.id);
+  else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
 });
 bot.command('debug', async (ctx) => {
   const s = [];
