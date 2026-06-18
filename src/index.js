@@ -22,6 +22,7 @@ let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
 let msgRefs = {}; // { [chatId]: messageId }
 let blinkState = false;
 let blinkTimer = null;
+let liveCheckTimer = null;
 
 function load() {
   try { if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); admin = d.adminId; grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; } } catch {}
@@ -196,7 +197,7 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
   if (!f.length) return '';
   const v = f.filter(p => !p.loc.toUpperCase().includes('DETERMINAR'));
   if (!v.length) return '';
-    const W = 9;
+    const W = 7;
   const viv = v.filter(p => p.estado === 'in').length;
   const fin = v.filter(p => p.estado === 'post').length;
   const pre = v.length - viv - fin;
@@ -226,14 +227,14 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
       mi = (dd + hh).padStart(6);
     }
     const nStr = String(p.num).padStart(2);
-    const rt = enVivo ? `🟢${nStr}` : `  ${nStr}`;
+    const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
     if (enVivo && blink) {
-      l.push(`${rt} ${' '.repeat(W)} ${' '.repeat(5)} ${' '.repeat(W)} ${' '.repeat(6)}`);
+      l.push(`${rt}${' '.repeat(W)}${' '.repeat(5)}${' '.repeat(W)}${' '.repeat(6)}`);
     } else {
       const loc = pad(abv(p.loc, W), W);
       const vis = pad(abv(p.vis, W), W);
       const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
-      l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
+      l.push(`${rt}${loc}${sc}${vis}${mi}`);
     }
   }
   let footer = `${v.length} partidos`;
@@ -395,7 +396,6 @@ function startBlink() {
     if (!blinkTimer) return;
     blinkState = !blinkState;
     blinkTick++;
-    if (blinkTick % 5 === 0) await refreshLiveScores();
     const msg = buildBoletoBlink(blinkState);
     if (!msg || !Object.keys(msgRefs).length) { stopBlink(); return; }
     let allFail = true;
@@ -417,6 +417,20 @@ function startBlink() {
 }
 function stopBlink() {
   if (blinkTimer) { clearTimeout(blinkTimer); blinkTimer = null; blinkState = false; blinkTick = 0; console.log('BLINK OFF'); }
+}
+
+// ── INDEPENDENT LIVE CHECK ──
+function startLiveCheck() {
+  if (liveCheckTimer) return;
+  const tick = async () => {
+    if (!liveCheckTimer) return;
+    await refreshLiveScores();
+    liveCheckTimer = setTimeout(tick, 15000);
+  };
+  liveCheckTimer = setTimeout(tick, 1000);
+}
+function stopLiveCheck() {
+  if (liveCheckTimer) { clearTimeout(liveCheckTimer); liveCheckTimer = null; }
 }
 
 // ── MAIN ──
