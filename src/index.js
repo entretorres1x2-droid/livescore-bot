@@ -509,6 +509,29 @@ bot.command('jornada', async (ctx) => {
 bot.command('partidos', async (ctx) => {
   await sendDeliver(buildBoletoBlink(false), ctx.chat.id);
 });
+bot.command('debug', async (ctx) => {
+  const s = [];
+  s.push(`JQ=${JQ} JQG=${JQG}`);
+  s.push(`grupo=${grupo} admin=${admin} blink=${!!blinkTimer}`);
+  s.push(`prev=${prev.length} msgRefs=${Object.keys(msgRefs).length}`);
+  s.push(`hasLive=${prev.some(p=>p.estado==='in')}`);
+  for (let i=0; i<Math.min(prev.length, 3); i++) {
+    const p = prev[i];
+    s.push(`${p.tipo} #${p.num}: ${p.loc} vs ${p.vis} [${p.estado}] gL=${p.gL} gV=${p.gV} min=${p.min}`);
+  }
+  ctx.reply(s.join('\n'), K);
+});
+bot.command('testmatch', async (ctx) => {
+  try {
+    const ev = await espn();
+    const p = prev[0] || { loc:'test', vis:'test', dia:'JUE' };
+    const m = match(p.loc, p.vis, ev, p.dia);
+    const pLoc = prep(p.loc);
+    const pVis = prep(p.vis);
+    const lives = ev.filter(e => e.status?.type?.state==='in').map(e => `${e.id}: ${e.name} [${e.status.type.state}]`).join('\n') || '(none)';
+    ctx.reply(`Prepared: ${pLoc} vs ${pVis}\nMatch: ${m ? JSON.stringify({gL:m.gL,gV:m.gV,min:m.min,est:m.est}) : 'null'}\nLive ESPN:\n${lives}`, K);
+  } catch (e) { ctx.reply('Error: '+e.message, K); }
+});
 
 // ── SERVER ──
 createServer((req, res) => {
