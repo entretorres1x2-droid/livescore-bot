@@ -283,8 +283,7 @@ function tickerLine(d, pl, loc, vis, sc) {
   const min = d.clock.displayValue;
   const suf = pl ? `${pl} (${min})` : `(${min})`;
   const em = evIcons[d.type.text] || '•';
-  const showScore = d.type.text === 'Goal' || d.type.text === 'OwnGoal' || d.type.text === 'Penalty';
-  return showScore ? `${em} ${suf} · ${loc} ${sc} ${vis}` : `${em} ${suf}`;
+  return `${em} ${suf} · ${loc} ${sc} ${vis}`;
 }
 function animateGoal(d, pl, loc, vis, sc) {
   return [
@@ -299,9 +298,9 @@ function animateOwn(d, pl, loc, vis, sc) {
   ];
 }
 function animateCard(title) {
-  return (d, pl) => [
+  return (d, pl, loc, vis, sc) => [
     `${title}`,
-    tickerLine(d, pl),
+    tickerLine(d, pl, loc, vis, sc),
   ];
 }
 const evMsg = {
