@@ -227,14 +227,14 @@ function fmtBoleto(todos, tipo, j, tit, blink) {
       mi = (dd + hh).padStart(6);
     }
     const nStr = String(p.num).padStart(2);
-    const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
+    const loc = pad(abv(p.loc, W), W);
+    const vis = pad(abv(p.vis, W), W);
+    const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
     if (enVivo && blink) {
-      l.push(`${rt}${' '.repeat(W)}${' '.repeat(5)}${' '.repeat(W)}${' '.repeat(6)}`);
+      l.push(` ${nStr} ${loc} ${sc} ${vis} ${' '.repeat(6)}`);
     } else {
-      const loc = pad(abv(p.loc, W), W);
-      const vis = pad(abv(p.vis, W), W);
-      const sc = ft || enVivo ? `${gL}-${gV}`.padStart(5) : '  -  ';
-      l.push(`${rt}${loc}${sc}${vis}${mi}`);
+      const rt = enVivo ? `🟢${nStr}` : ` ${nStr}`;
+      l.push(`${rt} ${loc} ${sc} ${vis} ${mi}`);
     }
   }
   let footer = `${v.length} partidos`;
