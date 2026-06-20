@@ -458,6 +458,7 @@ bot.on('my_chat_member', async (ctx) => {
     }
   }
 });
+bot.on('message', (ctx) => { if (!grupo && (ctx.chat.type==='group'||ctx.chat.type==='supergroup')) { grupo = ctx.chat.id; save(); console.log('Grupo auto-detectado:', grupo); } });
 bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
 bot.command('jornada', async (ctx) => {
   const msg = buildBoleto();
