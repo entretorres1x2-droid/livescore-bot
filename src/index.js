@@ -481,6 +481,7 @@ bot.command('debug', async (ctx) => {
   }
   ctx.reply(s.join('\n'), K);
 });
+bot.command('ping', async (ctx) => { ctx.reply('pong', K); });
 bot.command('testmatch', async (ctx) => {
   try {
     const ev = await espn();
@@ -508,6 +509,7 @@ async function init() {
   await bot.telegram.setWebhook(URL);
   console.log('Webhook OK');
   await check();
+  if (admin) try { await bot.telegram.sendMessage(admin, '🤖 Bot reiniciado'); } catch {}
   setInterval(check, INT*1000);
   startLiveCheck();
 }
