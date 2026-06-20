@@ -14,7 +14,7 @@ if (!TKN) { console.error('TELEGRAM_BOT_TOKEN no definido'); process.exit(1); }
 
 const bot = new Telegraf(TKN);
 const K = { reply_markup: { remove_keyboard: true } };
-let admin = null, grupo = null;
+let admin = parseInt(process.env.BOT_ADMIN) || null, grupo = parseInt(process.env.BOT_GROUP) || null;
 const CFG = join(__dirname, '..', 'datos', 'config.json');
 let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
@@ -23,7 +23,9 @@ let msgRefs = {}; // { [chatId]: messageId }
 let liveCheckTimer = null;
 
 function load() {
-  try { if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); admin = d.adminId; grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; } } catch {}
+  try {
+    if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); if (!admin) admin = d.adminId; if (!grupo) grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; }
+  } catch {}
 }
 function save() {
   try { const d = join(__dirname,'..','datos'); if (!existsSync(d)) mkdirSync(d,{recursive:true}); writeFileSync(CFG,JSON.stringify({adminId:admin,targetGroupId:grupo,jQ:JQ,jQG:JQG})); } catch {}
