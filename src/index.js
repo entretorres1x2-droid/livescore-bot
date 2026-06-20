@@ -459,7 +459,7 @@ bot.on('my_chat_member', async (ctx) => {
   }
 });
 bot.catch((e) => { console.error('bot error:', e.description || e.message); });
-bot.on('message', async (ctx) => {
+bot.on('message', async (ctx, next) => {
   try {
     if (!grupo && (ctx.chat.type==='group'||ctx.chat.type==='supergroup')) {
       grupo = ctx.chat.id; save(); console.log('Grupo detectado:', grupo);
@@ -467,6 +467,7 @@ bot.on('message', async (ctx) => {
       if (msg) await sendDeliver(msg, grupo);
     }
   } catch (e) { console.error('msg handler err:', e.message); }
+  await next();
 });
 bot.start(async (ctx) => { try { admin = ctx.chat.id; save(); await ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); if (grupo) { const m = buildBoleto(); if (m) await sendDeliver(m, grupo); } } catch (e) { console.error('start err:', e.message); } });
 bot.command('jornada', async (ctx) => {
