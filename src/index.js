@@ -472,15 +472,19 @@ bot.on('message', async (ctx, next) => {
 bot.start(async (ctx) => { try { admin = ctx.chat.id; save(); await ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); if (grupo) { const m = buildBoleto(); if (m) await sendDeliver(m, grupo); } } catch (e) { console.error('start err:', e.message); } });
 bot.command('jornada', async (ctx) => {
   const msg = buildBoleto();
-  if (msg) await sendDeliver(msg, ctx.chat.id);
-  else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
-  if (ctx.chat.id !== grupo) { try { await ctx.reply('✅ Boleto enviado', K); } catch {} }
+  if (msg) {
+    try { await ctx.reply(msg, { parse_mode: 'MarkdownV2' }); } catch { try { await ctx.reply(msg, { parse_mode: '' }); } catch {} }
+  } else {
+    ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
+  }
 });
 bot.command('partidos', async (ctx) => {
   const msg = buildBoleto();
-  if (msg) await sendDeliver(msg, ctx.chat.id);
-  else ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
-  if (ctx.chat.id !== grupo) { try { await ctx.reply('✅ Boleto enviado', K); } catch {} }
+  if (msg) {
+    try { await ctx.reply(msg, { parse_mode: 'MarkdownV2' }); } catch { try { await ctx.reply(msg, { parse_mode: '' }); } catch {} }
+  } else {
+    ctx.reply('⏳ Cargando datos... espera unos segundos.', K);
+  }
 });
 bot.command('debug', async (ctx) => {
   const s = [];
