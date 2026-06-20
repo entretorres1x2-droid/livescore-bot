@@ -458,8 +458,14 @@ bot.on('my_chat_member', async (ctx) => {
     }
   }
 });
-bot.on('message', (ctx) => { if (!grupo && (ctx.chat.type==='group'||ctx.chat.type==='supergroup')) { grupo = ctx.chat.id; save(); console.log('Grupo auto-detectado:', grupo); } });
-bot.start((ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); });
+bot.on('message', async (ctx) => {
+  if (!grupo && (ctx.chat.type==='group'||ctx.chat.type==='supergroup')) {
+    grupo = ctx.chat.id; save(); console.log('Grupo auto-detectado:', grupo);
+    const msg = buildBoleto();
+    if (msg) await sendDeliver(msg, grupo);
+  }
+});
+bot.start(async (ctx) => { admin = ctx.chat.id; save(); ctx.reply('✅ Bot activo. Añádeme a un grupo.', K); if (grupo) { const m = buildBoleto(); if (m) await sendDeliver(m, grupo); } });
 bot.command('jornada', async (ctx) => {
   const msg = buildBoleto();
   if (msg) await sendDeliver(msg, ctx.chat.id);
