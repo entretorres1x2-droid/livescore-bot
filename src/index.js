@@ -6,10 +6,10 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TKN = process.env.TELEGRAM_BOT_TOKEN;
-const TEMP = process.env.TEMPORADA || '2026';
 const INT = parseInt(process.env.POLL_INTERVAL) || 60;
 const PORT = process.env.PORT || 8080;
 const URL = 'https://livescore-bot-qpoh.onrender.com';
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/1O0qjt2JkKH57jYKY3ecFTk86W9e7pd7VirU0QaIJIoI/export?format=csv&gid=638977473';
 if (!TKN) { console.error('TELEGRAM_BOT_TOKEN no definido'); process.exit(1); }
 
 const bot = new Telegraf(TKN);
@@ -19,16 +19,18 @@ const CFG = join(__dirname, '..', 'datos', 'config.json');
 let prev = [];
 let JQ = parseInt(process.env.JORNADA_QUINIELA) || 68;
 let JQG = parseInt(process.env.JORNADA_QUINIGOL) || 78;
+let TEMP_Q = process.env.TEMPORADA_Q || process.env.TEMPORADA || '2026';
+let TEMP_QG = process.env.TEMPORADA_QG || process.env.TEMPORADA || '2026';
 let msgRefs = {}; // { [chatId]: messageId }
 let liveCheckTimer = null;
 
 function load() {
   try {
-    if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); if (!admin) admin = d.adminId; if (!grupo) grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; }
+    if (existsSync(CFG)) { const d = JSON.parse(readFileSync(CFG,'utf-8')); if (!admin) admin = d.adminId; if (!grupo) grupo = d.targetGroupId; JQ = d.jQ || JQ; JQG = d.jQG || JQG; TEMP_Q = d.tQ || TEMP_Q; TEMP_QG = d.tQG || TEMP_QG; }
   } catch {}
 }
 function save() {
-  try { const d = join(__dirname,'..','datos'); if (!existsSync(d)) mkdirSync(d,{recursive:true}); writeFileSync(CFG,JSON.stringify({adminId:admin,targetGroupId:grupo,jQ:JQ,jQG:JQG})); } catch {}
+  try { const d = join(__dirname,'..','datos'); if (!existsSync(d)) mkdirSync(d,{recursive:true}); writeFileSync(CFG,JSON.stringify({adminId:admin,targetGroupId:grupo,jQ:JQ,jQG:JQG,tQ:TEMP_Q,tQG:TEMP_QG})); } catch {}
 }
 load();
 
@@ -52,6 +54,24 @@ async function sendDeliver(msg, chatId) {
   } catch {}
 }
 
+// ── SHEET ──
+async function leerJornadasSheet() {
+  try {
+    const r = await fetch(SHEET_URL);
+    const txt = await r.text();
+    const lines = txt.trim().split('\n');
+    if (lines.length < 2) return;
+    const cols = lines[1].split(',');
+    const nJQ = parseInt(cols[0]);
+    const nJQG = parseInt(cols[1]);
+    const nTQ = (cols[2] || '').trim();
+    const nTQG = (cols[3] || '').trim();
+    if (nJQ && nJQ !== JQ) { console.log(`Q: J${JQ}→J${nJQ}`); JQ = nJQ; msgRefs = {}; }
+    if (nJQG && nJQG !== JQG) { console.log(`QG: J${JQG}→J${nJQG}`); JQG = nJQG; msgRefs = {}; }
+    if (nTQ && nTQ !== TEMP_Q) { console.log(`TEMP_Q: ${TEMP_Q}→${nTQ}`); TEMP_Q = nTQ; }
+    if (nTQG && nTQG !== TEMP_QG) { console.log(`TEMP_QG: ${TEMP_QG}→${nTQG}`); TEMP_QG = nTQG; }
+  } catch (e) { console.error('leerJornadasSheet:', e.message); }
+}
 
 // ── NORMALIZE ──
 function n(s) {
@@ -132,8 +152,9 @@ function match(loc, vis, eventos, dia) {
   return null;
 }
 async function losilla(tipo, j) {
-  const u = tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMP}`
-    :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${j}`;
+  const tm = tipo==='q'?TEMP_Q:TEMP_QG;
+  const u = tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${tm}`
+    :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${tm}&jornada=${j}`;
   const d = await jget(u); return d?.partidos||[];
 }
 
@@ -147,16 +168,17 @@ function todosFin(partidos) {
   });
 }
 async function detectar(tipo, inicio) {
+  const tm = tipo==='q'?TEMP_Q:TEMP_QG;
   for (let j=inicio; j<=inicio+50; j++) {
-    const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMP}`
-      :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${j}`);
+    const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${tm}`
+      :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${tm}&jornada=${j}`);
     if (!d?.partidos?.length||!tieneEquipos(d.partidos)) continue;
     if (tipo==='q') { if (d.estado==='ABIERTA') return j; if (d.estado!=='ESCRUTADA') return j; }
     else { const e = d.escrutinio?.estadoJornada; if (e==='Abierta') return j; if (e==='Cerrada'&&!todosFin(d.partidos)) return j; if (e==='Escrutada') continue; return j; }
   }
   for (let j=inicio-1; j>=Math.max(1,inicio-20); j--) {
-    const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${TEMP}`
-      :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${j}`);
+    const d = await jget(tipo==='q'?`https://api.eduardolosilla.es/escrutinios?num_jornada=${j}&num_temporada=${tm}`
+      :`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${tm}&jornada=${j}`);
     if (!d?.partidos?.length||!tieneEquipos(d.partidos)) continue;
     if (tipo==='q') { if (d.estado!=='ESCRUTADA') return j; }
     else { const e = d.escrutinio?.estadoJornada; if (e!=='Escrutada') return j; }
@@ -164,11 +186,8 @@ async function detectar(tipo, inicio) {
   return inicio;
 }
 async function verificarAvance() {
-  const [dq,dqg]=await Promise.all([jget(`https://api.eduardolosilla.es/escrutinios?num_jornada=${JQ}&num_temporada=${TEMP}`),jget(`https://api.eduardolosilla.es/quinigol/escrutinios?temporada=${TEMP}&jornada=${JQG}`)]);
-  let c=false;
-  if (dq?.partidos?.length && dq.estado==='ESCRUTADA' && todosFin(dq.partidos)) { const p=await detectar('q',JQ+1); if (p!==JQ) { JQ=p; c=true; console.log('Q→J'+JQ); } }
-  if (dqg?.partidos?.length && (dqg.escrutinio?.estadoJornada==='Escrutada'||(dqg.escrutinio?.estadoJornada==='Cerrada'&&todosFin(dqg.partidos)))) { const p=await detectar('qg',JQG+1); if (p!==JQG) { JQG=p; c=true; console.log('QG→J'+JQG); msgRefs={}; } }
-  if (c) save();
+  await leerJornadasSheet();
+  save();
 }
 
 // ── MAP ──
@@ -518,10 +537,9 @@ createServer((req, res) => {
 }).listen(PORT,'0.0.0.0',()=>console.log(`:${PORT}`));
 
 async function init() {
-  console.log('Detectando jornadas...');
-  JQ = await detectar('q', JQ);
-  JQG = await detectar('qg', JQG);
-  console.log(`Quiniela J${JQ}, Quinigol J${JQG}`);
+  console.log('Leyendo jornadas del Sheet...');
+  await leerJornadasSheet();
+  console.log(`Quiniela J${JQ} (T${TEMP_Q}), Quinigol J${JQG} (T${TEMP_QG})`);
   save();
   await bot.telegram.setWebhook(URL);
   console.log('Webhook OK');
